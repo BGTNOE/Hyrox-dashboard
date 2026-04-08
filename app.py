@@ -491,7 +491,9 @@ def render_tab(tab, indices):
 
     # ── Géographie ────────────────────────────────────────────────────────────
     elif tab == "geo":
-        by_country = (d.groupby("Country", sort=False)
+        d_geo = d[d["Country"].astype(str).str.strip() != ""].copy()
+        d_geo["Country"] = d_geo["Country"].astype(str)
+        by_country = (d_geo.groupby("Country", sort=False, observed=True)
                        .agg(Athletes=("Name","count"),
                             Avg_min=("Total_min","mean"),
                             Best_min=("Total_min","min"),
@@ -506,7 +508,8 @@ def render_tab(tab, indices):
             text=by_country.head(20)["Athletes"][::-1], textposition="outside"))
         fig_pays.update_layout(title="Top 20 pays – Athlètes", height=500, **CHART_LAYOUT)
 
-        fig_scat = px.scatter(by_country, x="Athletes", y="Avg_min", text="Country",
+        fig_scat = px.scatter(by_country[by_country["Athletes"] > 0],
+                              x="Athletes", y="Avg_min", text="Country",
                               size="Athletes", color="Avg_min",
                               color_continuous_scale="RdYlGn_r",
                               labels={"Avg_min": "Temps moyen (min)"},
@@ -515,7 +518,7 @@ def render_tab(tab, indices):
         fig_scat.update_traces(textposition="top center", marker=dict(sizemin=6))
 
         top5 = by_country.head(5)["Country"].tolist()
-        d5   = d[d["Country"].isin(top5)]
+        d5   = d_geo[d_geo["Country"].isin(top5)]
         fig_violin = go.Figure()
         for c in top5:
             fig_violin.add_trace(go.Violin(
