@@ -27,29 +27,13 @@ RUN_LABELS  = [f"Run {i}" for i in range(1, 9)]
 SCORE_COLS  = ["SkiErg_Score","SledPush_Score","SledPull_Score","BurpeeBJ_Score",
                "Row_Score","FarmersCarry_Score","SandbagLunges_Score","WallBalls_Score"]
 
-# Colonnes utiles seulement (économie mémoire)
-KEEP_COLS = (["Name","Team_Name","Athlete_Position","Category","Event","Event_Slug",
-               "Country","Age_Group","Rank","Rank_AG","Finish_Time",
-               "Total_sec","Runs_Total_sec","Workouts_Total_sec","Roxzone_sec"]
-             + WORKOUT_COLS + SCORE_COLS + RUN_COLS)
 
-pd.options.mode.chained_assignment = None  # supprime les FutureWarnings
+pd.options.mode.chained_assignment = None
 print("Chargement des données...", flush=True)
-_raw = pd.read_parquet(DATA_PATH)
-_cols = [c for c in KEEP_COLS if c in _raw.columns]
-df = _raw[_cols].copy()
-del _raw
+df = pd.read_parquet(DATA_PATH)
+df = df.reset_index(drop=True)
 
-# Types allégés pour économiser la mémoire
-_float_cols = [c for c in WORKOUT_COLS + SCORE_COLS + RUN_COLS
-               + ["Total_sec","Runs_Total_sec","Workouts_Total_sec","Roxzone_sec"]
-               if c in df.columns]
-df[_float_cols] = df[_float_cols].astype("float32")
-for _c in ["Category","Event","Country","Age_Group"]:
-    if _c in df.columns:
-        df[_c] = df[_c].astype("category")
-
-# Pré-calculs au démarrage
+# Pré-calculs
 df["Total_min"]    = (df["Total_sec"] / 60).astype("float32")
 df["Runs_min"]     = (df["Runs_Total_sec"] / 60).astype("float32")
 df["Workouts_min"] = (df["Workouts_Total_sec"] / 60).astype("float32")
@@ -59,9 +43,8 @@ df["Display_Name"] = df.apply(
 )
 df["Country"]   = df["Country"].astype(str).fillna("")
 df["Age_Group"] = df["Age_Group"].astype(str).fillna("–")
-df = df.reset_index(drop=True)
 ALL_INDICES = df.index.tolist()
-print(f"Données chargées : {len(df)} lignes, {df.memory_usage(deep=True).sum()/1e6:.0f} MB", flush=True)
+print(f"OK : {len(df)} lignes, {df.memory_usage(deep=True).sum()/1e6:.0f} MB", flush=True)
 
 # ── Ordre chronologique des événements ────────────────────────────────────────
 EVENT_DATES = {
