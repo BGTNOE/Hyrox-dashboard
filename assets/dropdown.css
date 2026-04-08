@@ -1,0 +1,88 @@
+/* ── Dash Dropdown dark theme ────────────────────────────────────────────── */
+
+/* react-select v5 (Dash 2.x) — classes dynamiques avec suffixes */
+
+/* Conteneur principal */
+.Select-control,
+[class$="-control"],
+[class*="-control "] {
+    background-color: #1A1D27 !important;
+    border-color: #2A2D3A !important;
+    color: #F0F2F8 !important;
+    box-shadow: none !important;
+}
+[class$="-control"]:hover {
+    border-color: #E8472B !important;
+}
+
+/* Menu déroulant */
+[class$="-menu"],
+[class*="-menu "],
+.Select-menu-outer {
+    background-color: #1A1D27 !important;
+    border: 1px solid #2A2D3A !important;
+    z-index: 9999 !important;
+}
+
+/* Options */
+[class$="-option"],
+[class*="-option "],
+.Select-option {
+    background-color: #1A1D27 !important;
+    color: #F0F2F8 !important;
+    cursor: pointer !important;
+}
+[class*="option--is-focused"],
+.Select-option:hover,
+.Select-option.is-focused {
+    background-color: #2A2D3A !important;
+    color: #ffffff !important;
+}
+[class*="option--is-selected"],
+.Select-option.is-selected {
+    background-color: rgba(232, 71, 43, 0.25) !important;
+    color: #ffffff !important;
+}
+
+/* Valeur sélectionnée */
+[class$="-singleValue"],
+[class*="-singleValue"],
+.Select-value-label {
+    color: #F0F2F8 !important;
+}
+
+/* Placeholder */
+[class$="-placeholder"],
+.Select-placeholder {
+    color: #9CA3AF !important;
+}
+
+/* Input */
+[class$="-Input"] input,
+.Select-input input {
+    color: #F0F2F8 !important;
+    caret-color: #F0F2F8 !important;
+}
+
+/* Multi-value tags */
+[class$="-multiValue"],
+[class*="-multiValue"] {
+    background-color: #2A2D3A !important;
+}
+[class$="-multiValueLabel"],
+[class*="-multiValueLabel"] {
+    color: #F0F2F8 !important;
+}
+[class$="-multiValueRemove"]:hover {
+    background-color: #E8472B !important;
+    color: white !important;
+}
+
+/* Séparateur & icône */
+[class$="-indicatorSeparator"] {
+    background-color: #2A2D3A !important;
+}
+[class$="-dropdownIndicator"] svg,
+[class$="-clearIndicator"] svg {
+    fill: #9CA3AF !important;
+}
