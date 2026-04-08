@@ -33,6 +33,7 @@ KEEP_COLS = (["Name","Team_Name","Athlete_Position","Category","Event","Event_Sl
                "Total_sec","Runs_Total_sec","Workouts_Total_sec","Roxzone_sec"]
              + WORKOUT_COLS + SCORE_COLS + RUN_COLS)
 
+pd.options.mode.chained_assignment = None  # supprime les FutureWarnings
 print("Chargement des données...", flush=True)
 _raw = pd.read_parquet(DATA_PATH)
 _cols = [c for c in KEEP_COLS if c in _raw.columns]
