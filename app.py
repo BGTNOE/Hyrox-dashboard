@@ -948,11 +948,10 @@ def generate_card(n_clicks, idx, indices):
                        xref="paper", yref="paper", x=0.5, y=0.04,
                        showarrow=False, font=dict(size=13, color=SUBTEXT), xanchor="center")
 
-    buf = io.BytesIO()
-    fig.write_image(buf, format="png", width=1080, height=1080, scale=1)
-    encoded = base64.b64encode(buf.getvalue()).decode()
-    filename = f"hyrox_{str(display_name).replace(' ','_').replace(',','-')}.png"
-    return dict(content=encoded, filename=filename, type="image/png", base64=True)
+    html_str = fig.to_html(full_html=True, include_plotlyjs="cdn")
+    encoded = base64.b64encode(html_str.encode()).decode()
+    filename = f"hyrox_{str(display_name).replace(' ','_').replace(',','-')}.html"
+    return dict(content=encoded, filename=filename, base64=True)
 
 
 # ── CB6 : Analyse Coach ───────────────────────────────────────────────────────
