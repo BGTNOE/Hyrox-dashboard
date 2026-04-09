@@ -4,6 +4,7 @@ Run: python3 hyrox_dashboard.py  → ouvre http://127.0.0.1:8050
 """
 
 import os, io, base64, unicodedata
+from functools import lru_cache
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
@@ -17,6 +18,9 @@ def normalize_str(s):
 
 # ── Chargement des données ─────────────────────────────────────────────────────
 DATA_PATH = "hyrox_data.parquet"
+print("Chargement des données...", flush=True)
+pd.options.mode.chained_assignment = None
+df = pd.read_parquet(DATA_PATH)
 
 WORKOUT_COLS   = ["SkiErg_sec","SledPush_sec","SledPull_sec","BurpeeBJ_sec",
                   "Row_sec","FarmersCarry_sec","SandbagLunges_sec","WallBalls_sec"]
@@ -27,24 +31,18 @@ RUN_LABELS  = [f"Run {i}" for i in range(1, 9)]
 SCORE_COLS  = ["SkiErg_Score","SledPush_Score","SledPull_Score","BurpeeBJ_Score",
                "Row_Score","FarmersCarry_Score","SandbagLunges_Score","WallBalls_Score"]
 
-
-pd.options.mode.chained_assignment = None
-print("Chargement des données...", flush=True)
-df = pd.read_parquet(DATA_PATH)
-df = df.reset_index(drop=True)
-
-# Pré-calculs
-df["Total_min"]    = (df["Total_sec"] / 60).astype("float32")
-df["Runs_min"]     = (df["Runs_Total_sec"] / 60).astype("float32")
-df["Workouts_min"] = (df["Workouts_Total_sec"] / 60).astype("float32")
-df["Roxzone_min"]  = (df["Roxzone_sec"] / 60).astype("float32")
+# Pré-calculs au démarrage
+df["Total_min"]    = df["Total_sec"] / 60
+df["Runs_min"]     = df["Runs_Total_sec"] / 60
+df["Workouts_min"] = df["Workouts_Total_sec"] / 60
+df["Roxzone_min"]  = df["Roxzone_sec"] / 60
 df["Display_Name"] = df.apply(
     lambda r: r["Team_Name"] if pd.notna(r.get("Team_Name")) else r["Name"], axis=1
 )
-df["Country"]   = df["Country"].astype(str).fillna("")
-df["Age_Group"] = df["Age_Group"].astype(str).fillna("–")
+df["Country"]   = df["Country"].fillna("")
+df["Age_Group"] = df["Age_Group"].fillna("–")
+df = df.reset_index(drop=True)
 ALL_INDICES = df.index.tolist()
-print(f"OK : {len(df)} lignes, {df.memory_usage(deep=True).sum()/1e6:.0f} MB", flush=True)
 
 # ── Ordre chronologique des événements ────────────────────────────────────────
 EVENT_DATES = {
@@ -158,7 +156,7 @@ app = Dash(
     title="Hyrox Season 8 – All Events",
     assets_folder="assets",
 )
-server = app.server  # expose Flask server pour gunicorn
+server = app.server
 
 app.index_string = '''
 <!DOCTYPE html>
@@ -206,7 +204,8 @@ def card(children, **kwargs):
 app.layout = html.Div(
     style={"backgroundColor": BG, "minHeight": "100vh", "fontFamily": "Inter, sans-serif"},
     children=[
-        dcc.Store(id="filtered-store", data=ALL_INDICES),
+        # Store léger : seulement les paramètres de filtre (pas les 166k indices)
+        dcc.Store(id="filtered-store", data={"events": [], "cats": [], "countries": [], "ags": [], "topn": TOTAL_ATHLETES}),
         dcc.Download(id="download-card"),
 
         # Header
@@ -260,7 +259,9 @@ app.layout = html.Div(
                                value=TOTAL_ATHLETES,
                                marks={10: "10", 1000: "1k", 10000: "10k", 50000: "50k",
                                       TOTAL_ATHLETES: "All"},
-                               tooltip={"placement": "bottom"}, className="mt-1"),
+                               tooltip={"placement": "bottom"},
+                               updatemode="mouseup",
+                               className="mt-1"),
                 ], md=2),
             ], className="mb-4 p-3",
                style={"backgroundColor": CARD_BG, "borderRadius": "10px", "border": f"1px solid {GRID}"}),
@@ -308,12 +309,40 @@ app.layout = html.Div(
                                         "borderTop": f"2px solid {ACCENT}"}),
             ], style={"marginBottom": "20px"}),
 
-            html.Div(id="tab-content"),
+            dcc.Loading(
+                id="loading-tab",
+                type="dot",
+                color=ACCENT,
+                children=html.Div(id="tab-content"),
+            ),
         ]),
     ]
 )
 
-# ── CB1 : Store ────────────────────────────────────────────────────────────────
+# ── Cache de filtrage (evite de recalculer à chaque callback) ─────────────────
+@lru_cache(maxsize=128)
+def _cached_filter(events_t, cats_t, countries_t, ags_t, topn):
+    mask = pd.Series(True, index=df.index)
+    if events_t:    mask &= df["Event"].isin(events_t)
+    if cats_t:      mask &= df["Category"].isin(cats_t)
+    if countries_t: mask &= df["Country"].isin(countries_t)
+    if ags_t:       mask &= df["Age_Group"].isin(ags_t)
+    idx = df.index[mask]
+    if topn and topn < len(idx):
+        idx = idx[:topn]
+    return idx.tolist()
+
+def get_filtered_df(store):
+    if store is None:
+        return df
+    ev  = tuple(sorted(store.get("events",   []) or []))
+    cat = tuple(sorted(store.get("cats",     []) or []))
+    co  = tuple(sorted(store.get("countries",[]) or []))
+    ag  = tuple(sorted(store.get("ags",      []) or []))
+    tn  = store.get("topn", TOTAL_ATHLETES) or TOTAL_ATHLETES
+    return df.loc[_cached_filter(ev, cat, co, ag, tn)]
+
+# ── CB1 : Store (stocke les paramètres, pas les indices) ──────────────────────
 @app.callback(
     Output("filtered-store", "data"),
     [Input("filter-event", "value"), Input("filter-category", "value"),
@@ -321,20 +350,14 @@ app.layout = html.Div(
      Input("filter-topn", "value")]
 )
 def update_store(events, categories, countries, ags, topn):
-    mask = pd.Series(True, index=df.index)
-    if events:     mask &= df["Event"].isin(events)
-    if categories: mask &= df["Category"].isin(categories)
-    if countries:  mask &= df["Country"].isin(countries)
-    if ags:        mask &= df["Age_Group"].isin(ags)
-    indices = df.index[mask].tolist()
-    if topn and topn < len(indices):
-        indices = indices[:topn]
-    return indices
+    return {"events": events or [], "cats": categories or [],
+            "countries": countries or [], "ags": ags or [],
+            "topn": topn or TOTAL_ATHLETES}
 
 # ── CB2 : KPIs ────────────────────────────────────────────────────────────────
 @app.callback(Output("kpi-row", "children"), Input("filtered-store", "data"))
-def update_kpis(indices):
-    d = df.loc[indices]
+def update_kpis(store):
+    d = get_filtered_df(store)
     n = len(d)
     if n == 0:
         return dbc.Row([dbc.Col(kpi_card("bi-people-fill", "Athlètes", "0", "0 pays"), md=3)])
@@ -356,8 +379,8 @@ def update_kpis(indices):
     Output("tab-content", "children"),
     [Input("tabs", "value"), Input("filtered-store", "data")]
 )
-def render_tab(tab, indices):
-    d = df.loc[indices]
+def render_tab(tab, store):
+    d = get_filtered_df(store)
     if len(d) == 0:
         return html.Div("Aucune donnée pour ces filtres.", style={"color": SUBTEXT, "padding": "40px"})
 
@@ -728,11 +751,11 @@ def render_tab(tab, indices):
     State("filtered-store", "data"),
     prevent_initial_call=True
 )
-def update_athlete_profile(idx, compare_mode, indices):
+def update_athlete_profile(idx, compare_mode, store):
     if idx is None:
         return html.Div("Sélectionnez un athlète", style={"color": SUBTEXT})
 
-    d   = df.loc[indices]
+    d   = get_filtered_df(store)
     row = df.loc[idx]
 
     if compare_mode == "median":
@@ -847,11 +870,11 @@ def update_athlete_profile(idx, compare_mode, indices):
     [State("athlete-select", "value"), State("filtered-store", "data")],
     prevent_initial_call=True
 )
-def generate_card(n_clicks, idx, indices):
+def generate_card(n_clicks, idx, store):
     if not n_clicks or idx is None:
         return None
 
-    d   = df.loc[indices]
+    d   = get_filtered_df(store)
     row = df.loc[idx]
     display_name = row.get("Team_Name") if pd.notna(row.get("Team_Name")) else row["Name"]
     rank         = row.get("Rank", "?")
@@ -955,10 +978,11 @@ def generate_card(n_clicks, idx, indices):
                        xref="paper", yref="paper", x=0.5, y=0.04,
                        showarrow=False, font=dict(size=13, color=SUBTEXT), xanchor="center")
 
-    html_str = fig.to_html(full_html=True, include_plotlyjs="cdn")
-    encoded = base64.b64encode(html_str.encode()).decode()
-    filename = f"hyrox_{str(display_name).replace(' ','_').replace(',','-')}.html"
-    return dict(content=encoded, filename=filename, base64=True)
+    buf = io.BytesIO()
+    fig.write_image(buf, format="png", width=1080, height=1080, scale=1)
+    encoded = base64.b64encode(buf.getvalue()).decode()
+    filename = f"hyrox_{str(display_name).replace(' ','_').replace(',','-')}.png"
+    return dict(content=encoded, filename=filename, type="image/png", base64=True)
 
 
 # ── CB6 : Analyse Coach ───────────────────────────────────────────────────────
@@ -968,11 +992,11 @@ def generate_card(n_clicks, idx, indices):
     State("filtered-store", "data"),
     prevent_initial_call=True
 )
-def update_coach(idx, indices):
+def update_coach(idx, store):
     if idx is None:
         return html.Div("Sélectionnez un athlète", style={"color": SUBTEXT})
 
-    d   = df.loc[indices]
+    d   = get_filtered_df(store)
     row = df.loc[idx]
 
     display_name = row.get("Team_Name") if pd.notna(row.get("Team_Name")) else row["Name"]
