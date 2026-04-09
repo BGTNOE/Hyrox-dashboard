@@ -18,9 +18,7 @@ def normalize_str(s):
 
 # ── Chargement des données ─────────────────────────────────────────────────────
 DATA_PATH = "hyrox_data.parquet"
-print("Chargement des données...", flush=True)
 pd.options.mode.chained_assignment = None
-df = pd.read_parquet(DATA_PATH)
 
 WORKOUT_COLS   = ["SkiErg_sec","SledPush_sec","SledPull_sec","BurpeeBJ_sec",
                   "Row_sec","FarmersCarry_sec","SandbagLunges_sec","WallBalls_sec"]
@@ -31,18 +29,27 @@ RUN_LABELS  = [f"Run {i}" for i in range(1, 9)]
 SCORE_COLS  = ["SkiErg_Score","SledPush_Score","SledPull_Score","BurpeeBJ_Score",
                "Row_Score","FarmersCarry_Score","SandbagLunges_Score","WallBalls_Score"]
 
+print("Chargement des données...", flush=True)
+_raw = pd.read_parquet(DATA_PATH)
+# Convertir les colonnes category → str pour éviter les erreurs fillna sur Categorical
+for _c in ["Country", "Age_Group", "Category", "Event", "Name", "Team_Name", "Finish_Time"]:
+    if _c in _raw.columns:
+        _raw[_c] = _raw[_c].astype(str).replace("nan", "")
+df = _raw.reset_index(drop=True)
+del _raw
+
 # Pré-calculs au démarrage
 df["Total_min"]    = df["Total_sec"] / 60
 df["Runs_min"]     = df["Runs_Total_sec"] / 60
 df["Workouts_min"] = df["Workouts_Total_sec"] / 60
 df["Roxzone_min"]  = df["Roxzone_sec"] / 60
 df["Display_Name"] = df.apply(
-    lambda r: r["Team_Name"] if pd.notna(r.get("Team_Name")) else r["Name"], axis=1
+    lambda r: r["Team_Name"] if r.get("Team_Name", "") not in ("", "nan") else r["Name"], axis=1
 )
-df["Country"]   = df["Country"].fillna("")
-df["Age_Group"] = df["Age_Group"].fillna("–")
-df = df.reset_index(drop=True)
+df["Country"]   = df["Country"].replace("", "").fillna("")
+df["Age_Group"] = df["Age_Group"].replace("", "–").fillna("–")
 ALL_INDICES = df.index.tolist()
+print(f"OK : {len(df)} lignes", flush=True)
 
 # ── Ordre chronologique des événements ────────────────────────────────────────
 EVENT_DATES = {
