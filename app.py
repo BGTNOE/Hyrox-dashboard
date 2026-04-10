@@ -48,6 +48,10 @@ df["Display_Name"] = df.apply(
 )
 df["Country"]   = df["Country"].replace("", "").fillna("")
 df["Age_Group"] = df["Age_Group"].replace("", "–").fillna("–")
+# Score équilibre Running/Workout (% du temps total passé en running)
+_total_rw = df["Runs_Total_sec"] + df["Workouts_Total_sec"]
+df["Balance_Score"] = (df["Runs_Total_sec"] / _total_rw.replace(0, np.nan) * 100).round(1)
+del _total_rw
 ALL_INDICES = df.index.tolist()
 print(f"OK : {len(df)} lignes", flush=True)
 
@@ -89,6 +93,21 @@ df["Continent"] = df["Country"].map(COUNTRY_CONTINENT).fillna("Other")
 _name_event_counts = (df.groupby(df["Name"].str.strip().str.upper())["Event"]
                         .nunique())
 MULTI_EVENT_NAMES = set(_name_event_counts[_name_event_counts > 1].index)
+
+# Options statiques pour le suivi saison : tous les athlètes 2+ events, triés par nb events desc
+# (client-side filtering par Dash, pas besoin de callback serveur)
+print("Calcul des options saison...", flush=True)
+_multi_sorted = _name_event_counts[_name_event_counts >= 2].sort_values(ascending=False)
+SEASON_SEARCH_OPTIONS = []
+for _norm_name, _n_ev in _multi_sorted.items():
+    _rows = df[df["Name"].str.strip().str.upper() == _norm_name]
+    if len(_rows) == 0:
+        continue
+    _r = _rows.iloc[0]
+    _label = (f"{str(_r['Name']).strip()} · {_n_ev} courses "
+              f"({_r.get('Category','')}, {_r['Country']})")
+    SEASON_SEARCH_OPTIONS.append({"label": _label, "value": str(_r["Name"]).strip()})
+print(f"Options saison : {len(SEASON_SEARCH_OPTIONS)} athlètes multi-events", flush=True)
 
 def build_athlete_options(d):
     """Construit les options du dropdown — une seule ligne par équipe/duo."""
@@ -223,7 +242,7 @@ app.layout = html.Div(
                 html.Span(" · All Events 2025-2026", style={"fontSize": "1.1rem", "color": SUBTEXT}),
             ], style={"display": "flex", "alignItems": "center"}),
             html.Div(
-                f"{TOTAL_ATHLETES:,} athlètes · {len(events_sorted)} événements · 14 catégories".replace(",", " "),
+                f"{TOTAL_ATHLETES:,} athlètes · {len(events_sorted)} événements · {len(categories_sorted)} catégories · {df['Country'].nunique()} pays".replace(",", " "),
                 style={"color": SUBTEXT, "fontSize": ".8rem"}
             ),
         ], style={
@@ -307,6 +326,10 @@ app.layout = html.Div(
                         selected_style={"backgroundColor": CARD_BG, "color": TEXT,
                                         "borderTop": f"2px solid {ACCENT}"}),
                 dcc.Tab(label="📈 Évolution Saison",  value="season",
+                        style={"backgroundColor": BG, "color": SUBTEXT},
+                        selected_style={"backgroundColor": CARD_BG, "color": TEXT,
+                                        "borderTop": f"2px solid {ACCENT}"}),
+                dcc.Tab(label="⚔️ Face-à-Face",      value="faceaface",
                         style={"backgroundColor": BG, "color": SUBTEXT},
                         selected_style={"backgroundColor": CARD_BG, "color": TEXT,
                                         "borderTop": f"2px solid {ACCENT}"}),
@@ -426,6 +449,36 @@ def render_tab(tab, store):
             hole=0.6, marker_colors=[ACCENT, BLUE, GREEN], textinfo="label+percent"))
         fig_donut.update_layout(title="Décomposition moyenne", **CHART_LAYOUT)
 
+        # Balance Score distribution
+        bal = d["Balance_Score"].dropna()
+        avg_bal = bal.mean()
+        fig_balance = go.Figure()
+        fig_balance.add_trace(go.Histogram(
+            x=bal, nbinsx=40, marker_color=BLUE, opacity=0.8, name="Athlètes"))
+        fig_balance.add_vline(x=avg_bal, line_dash="dash", line_color=ACCENT,
+                              annotation_text=f"Moy {avg_bal:.1f}%",
+                              annotation_font_color=ACCENT)
+        fig_balance.add_vline(x=50, line_dash="dot", line_color=GREEN,
+                              annotation_text="Équilibre 50%",
+                              annotation_font_color=GREEN)
+        fig_balance.update_layout(
+            title="Score équilibre Running/Workout (% temps en running)",
+            xaxis_title="% du temps passé en running", yaxis_title="Athlètes",
+            **CHART_LAYOUT)
+
+        # Score répartition moyens par profil
+        n_runners  = int((bal > 55).sum())
+        n_workers  = int((bal < 45).sum())
+        n_balanced = int(((bal >= 45) & (bal <= 55)).sum())
+        fig_profile = go.Figure(go.Pie(
+            labels=["Runners (>55%)", "Équilibrés (45-55%)", "Workers (<45%)"],
+            values=[n_runners, n_balanced, n_workers],
+            hole=0.55,
+            marker_colors=[BLUE, GREEN, ACCENT],
+            textinfo="label+percent",
+        ))
+        fig_profile.update_layout(title="Répartition des profils", **CHART_LAYOUT)
+
         return html.Div([
             dbc.Row([
                 dbc.Col(card(dcc.Graph(figure=fig_hist,    config={"displayModeBar": False})), md=8),
@@ -434,6 +487,10 @@ def render_tab(tab, store):
             dbc.Row([
                 dbc.Col(card(dcc.Graph(figure=fig_top20,   config={"displayModeBar": False})), md=5),
                 dbc.Col(card(dcc.Graph(figure=fig_scatter, config={"displayModeBar": False})), md=7),
+            ], className="g-3 mb-3"),
+            dbc.Row([
+                dbc.Col(card(dcc.Graph(figure=fig_balance, config={"displayModeBar": False})), md=8),
+                dbc.Col(card(dcc.Graph(figure=fig_profile, config={"displayModeBar": False})), md=4),
             ], className="g-3"),
         ])
 
@@ -557,7 +614,30 @@ def render_tab(tab, store):
         fig_violin.update_layout(title="Distribution – Top 5 pays",
                                   yaxis_title="Temps (min)", **CHART_LAYOUT)
 
+        fig_map = px.choropleth(
+            by_country,
+            locations="Country",
+            locationmode="ISO-3",
+            color="Athletes",
+            hover_name="Country",
+            hover_data={"Athletes": True, "Avg_min": ":.1f", "Best_min": ":.1f"},
+            color_continuous_scale="Reds",
+            title="Carte mondiale des participants",
+        )
+        fig_map.update_layout(
+            geo=dict(bgcolor=PLOTBG, lakecolor=PLOTBG, landcolor=CARD_BG,
+                     showframe=False, showcoastlines=True, coastlinecolor=GRID,
+                     showland=True, showcountries=True, countrycolor=GRID),
+            coloraxis_colorbar=dict(title="Athlètes", tickfont=dict(color=TEXT),
+                                    titlefont=dict(color=TEXT)),
+            **{k: v for k, v in CHART_LAYOUT.items() if k not in ["xaxis", "yaxis"]},
+            height=420,
+        )
+
         return html.Div([
+            dbc.Row([
+                dbc.Col(card(dcc.Graph(figure=fig_map, config={"displayModeBar": False})), md=12),
+            ], className="g-3 mb-3"),
             dbc.Row([
                 dbc.Col(card(dcc.Graph(figure=fig_pays,   config={"displayModeBar": False})), md=5),
                 dbc.Col(card(dcc.Graph(figure=fig_scat,   config={"displayModeBar": False})), md=7),
@@ -710,8 +790,8 @@ def render_tab(tab, store):
                     html.Label("Nom de l'athlète (tape pour chercher, insensible aux accents)",
                                style={"color": SUBTEXT, "fontSize": ".75rem"}),
                     dcc.Dropdown(id="season-athlete-search",
-                                 options=[], value=None,
-                                 placeholder="Ex: Gregoire, Müller, O'Brien...",
+                                 options=SEASON_SEARCH_OPTIONS, value=None,
+                                 placeholder=f"Recherche parmi {len(SEASON_SEARCH_OPTIONS)} athlètes multi-events...",
                                  searchable=True, clearable=True,
                                  style=_dd_style),
                 ], md=6),
@@ -748,7 +828,71 @@ def render_tab(tab, store):
             html.Div(id="season-benchmark"),
         ])
 
+    # ── Face-à-Face ───────────────────────────────────────────────────────────
+    elif tab == "faceaface":
+        ff_options = build_athlete_options(d)
+        return html.Div([
+            dbc.Row([
+                dbc.Col([
+                    html.Label("Athlète A", style={"color": SUBTEXT}),
+                    dcc.Dropdown(id="ff-athlete-a", options=ff_options,
+                                 value=ff_options[0]["value"] if ff_options else None,
+                                 style=_dd_style),
+                ], md=5),
+                dbc.Col([
+                    html.Div("VS", style={"color": ACCENT, "fontSize": "2rem",
+                                          "fontWeight": "800", "textAlign": "center",
+                                          "lineHeight": "38px", "marginTop": "20px"}),
+                ], md=2, style={"textAlign": "center"}),
+                dbc.Col([
+                    html.Label("Athlète B", style={"color": SUBTEXT}),
+                    dcc.Dropdown(id="ff-athlete-b", options=ff_options,
+                                 value=ff_options[1]["value"] if len(ff_options) > 1 else None,
+                                 style=_dd_style),
+                ], md=5),
+            ], className="mb-4"),
+            dcc.Loading(type="dot", color=ACCENT,
+                        children=html.Div(id="faceaface-content")),
+        ])
+
     return html.Div("Chargement...", style={"color": SUBTEXT})
+
+
+def _build_balance_row(row):
+    """Bandeau Score équilibre Running/Workout pour un athlète."""
+    bal = row.get("Balance_Score")
+    if pd.isna(bal):
+        return html.Div()
+    run_pct  = float(bal)
+    work_pct = 100 - run_pct
+    if run_pct > 55:
+        label, color = "Profil Runner", BLUE
+        tip = f"Tu passes {run_pct:.1f}% de ton temps à courir — vise les stations pour progresser."
+    elif run_pct < 45:
+        label, color = "Profil Worker", ACCENT
+        tip = f"Tu passes {work_pct:.1f}% en stations — ton running peut être ta plus grande marge."
+    else:
+        label, color = "Profil Équilibré", GREEN
+        tip = f"Running / Workout presque à égalité ({run_pct:.1f}% / {work_pct:.1f}%)."
+    return dbc.Row([
+        dbc.Col([
+            html.Div("Score équilibre Running/Workout",
+                     style={"color": SUBTEXT, "fontSize": ".75rem",
+                            "textTransform": "uppercase", "marginBottom": "6px"}),
+            dbc.Progress([
+                dbc.Progress(value=run_pct,  color="primary",  bar=True,
+                             label=f"Running {run_pct:.0f}%"),
+                dbc.Progress(value=work_pct, color="danger", bar=True,
+                             label=f"Workout {work_pct:.0f}%"),
+            ], style={"height": "22px", "borderRadius": "6px"}),
+            html.Div([
+                dbc.Badge(label, color="primary" if color == BLUE else
+                          "success" if color == GREEN else "danger",
+                          className="me-2 mt-2"),
+                html.Span(tip, style={"color": SUBTEXT, "fontSize": ".8rem"}),
+            ]),
+        ]),
+    ], className="mt-1")
 
 
 # ── CB4 : Profil athlète ──────────────────────────────────────────────────────
@@ -853,6 +997,9 @@ def update_athlete_profile(idx, compare_mode, store):
                  style={"color": SUBTEXT, "marginBottom": "8px",
                         "fontSize": ".75rem", "textTransform": "uppercase"}),
         score_cards,
+        html.Hr(style={"borderColor": GRID}),
+        # Balance Score
+        html.Div(id="athlete-balance-row", children=_build_balance_row(row)),
         html.Hr(style={"borderColor": GRID}),
         dbc.Row([
             dbc.Col(dbc.Button("📸 Générer ma carte",
@@ -1226,38 +1373,6 @@ def update_season_macro(selected_cats):
     ], className="g-3")
 
 
-# ── CB8a : Options dynamiques dropdown athlète saison ─────────────────────────
-@app.callback(
-    Output("season-athlete-search", "options"),
-    Input("season-athlete-search", "search_value"),
-    prevent_initial_call=True
-)
-def update_season_athlete_options(search_value):
-    if not search_value or len(search_value.strip()) < 2:
-        return []
-    q = normalize_str(search_value.strip())
-    # Dédupliquer par nom normalisé
-    mask = df["Name"].apply(lambda n: q in normalize_str(n))
-    matches = df[mask]
-    if len(matches) == 0:
-        return []
-    # Une option par nom unique (Display_Name)
-    seen = set()
-    options = []
-    for _, r in matches.iterrows():
-        key = str(r["Name"]).strip().upper()
-        if key in seen:
-            continue
-        seen.add(key)
-        n_events = matches[matches["Name"].str.strip().str.upper() == key]["Event"].nunique()
-        event_str = f" · {n_events} course(s)" if n_events > 1 else f" · {r.get('Event','')}"
-        label = f"{str(r['Name']).strip()}{event_str} ({r.get('Category','')}, {r['Country']})"
-        options.append({"label": label, "value": str(r["Name"]).strip()})
-        if len(options) >= 50:
-            break
-    return options
-
-
 # ── CB8b : Résultat analyse saison ────────────────────────────────────────────
 @app.callback(
     Output("season-athlete-result", "children"),
@@ -1497,6 +1612,202 @@ def update_benchmark(ev_a, ev_b, cat):
                   style={"backgroundColor": "#0D1F2D", "borderColor": BLUE,
                          "color": TEXT, "borderLeft": f"4px solid {BLUE}",
                          "fontSize": "1rem"}),
+    ])
+
+
+# ── CB10 : Face-à-Face ────────────────────────────────────────────────────────
+@app.callback(
+    Output("faceaface-content", "children"),
+    [Input("ff-athlete-a", "value"), Input("ff-athlete-b", "value")],
+    State("filtered-store", "data"),
+    prevent_initial_call=True
+)
+def update_faceaface(idx_a, idx_b, store):
+    if idx_a is None or idx_b is None:
+        return html.Div("Sélectionnez deux athlètes.", style={"color": SUBTEXT, "padding": "20px"})
+    if idx_a == idx_b:
+        return dbc.Alert("Choisissez deux athlètes différents.", color="warning",
+                         style={"backgroundColor": "#2D2000", "color": TEXT, "borderColor": ORANGE})
+
+    d    = get_filtered_df(store)
+    ra   = df.loc[idx_a]
+    rb   = df.loc[idx_b]
+    na   = ra.get("Team_Name") if pd.notna(ra.get("Team_Name")) else ra["Name"]
+    nb   = rb.get("Team_Name") if pd.notna(rb.get("Team_Name")) else rb["Name"]
+    sa   = str(na).split(",")[0].split()[-1]
+    sb   = str(nb).split(",")[0].split()[-1]
+
+    rank_a = ra.get("Rank", "?")
+    rank_b = rb.get("Rank", "?")
+    n      = len(d)
+    pct_a  = (1 - (rank_a - 1) / n) * 100 if isinstance(rank_a, (int, float)) and n > 0 else None
+    pct_b  = (1 - (rank_b - 1) / n) * 100 if isinstance(rank_b, (int, float)) and n > 0 else None
+
+    # ── Cartes récap côte à côte ──────────────────────────────────────────────
+    def stat_col(label, val_a, val_b, fmt_fn=lambda x: x, lower_is_better=True):
+        fa, fb = fmt_fn(val_a), fmt_fn(val_b)
+        ca = TEXT; cb = TEXT
+        if pd.notna(val_a) and pd.notna(val_b):
+            if lower_is_better:
+                ca = GREEN if val_a < val_b else (ACCENT if val_a > val_b else TEXT)
+                cb = GREEN if val_b < val_a else (ACCENT if val_b > val_a else TEXT)
+            else:
+                ca = GREEN if val_a > val_b else (ACCENT if val_a < val_b else TEXT)
+                cb = GREEN if val_b > val_a else (ACCENT if val_b < val_a else TEXT)
+        return dbc.Row([
+            dbc.Col(html.Div(fa, style={"color": ca, "fontWeight": "700",
+                                        "fontSize": "1.1rem", "textAlign": "right"}), md=4),
+            dbc.Col(html.Div(label, style={"color": SUBTEXT, "fontSize": ".7rem",
+                                           "textAlign": "center", "textTransform": "uppercase",
+                                           "lineHeight": "1.6"}), md=4),
+            dbc.Col(html.Div(fb, style={"color": cb, "fontWeight": "700",
+                                        "fontSize": "1.1rem", "textAlign": "left"}), md=4),
+        ], className="mb-1")
+
+    def _pct_str(p):
+        return f"Top {100-p:.0f}%" if p is not None else "–"
+
+    summary = dbc.Card([dbc.CardBody([
+        dbc.Row([
+            dbc.Col(html.Div([
+                html.Div(str(na).upper(), style={"color": ACCENT, "fontWeight": "800", "fontSize": "1.1rem"}),
+                html.Div(f"{ra.get('Event','')} · {ra.get('Category','')}", style={"color": SUBTEXT, "fontSize": ".75rem"}),
+            ], style={"textAlign": "right"}), md=5),
+            dbc.Col(html.Div("⚔️", style={"textAlign": "center", "fontSize": "1.5rem"}), md=2),
+            dbc.Col(html.Div([
+                html.Div(str(nb).upper(), style={"color": BLUE, "fontWeight": "800", "fontSize": "1.1rem"}),
+                html.Div(f"{rb.get('Event','')} · {rb.get('Category','')}", style={"color": SUBTEXT, "fontSize": ".75rem"}),
+            ], style={"textAlign": "left"}), md=5),
+        ], className="mb-3 align-items-center"),
+        html.Hr(style={"borderColor": GRID}),
+        stat_col("Temps final",    ra.get("Total_sec"),          rb.get("Total_sec"),          sec_to_mmss),
+        stat_col("Classement",     rank_a,                        rank_b,                        lambda x: f"#{x}"),
+        stat_col("Classement AG",  ra.get("Rank_AG","?"),         rb.get("Rank_AG","?"),         lambda x: f"#{x}"),
+        stat_col("Percentile",     pct_a,                         pct_b,                         _pct_str, lower_is_better=False),
+        stat_col("Running total",  ra.get("Runs_Total_sec"),      rb.get("Runs_Total_sec"),      sec_to_mmss),
+        stat_col("Workout total",  ra.get("Workouts_Total_sec"),  rb.get("Workouts_Total_sec"),  sec_to_mmss),
+        stat_col("Roxzone",        ra.get("Roxzone_sec"),         rb.get("Roxzone_sec"),         sec_to_mmss),
+        stat_col("Score équilibre", ra.get("Balance_Score"),      rb.get("Balance_Score"),
+                 lambda x: f"{x:.1f}%" if pd.notna(x) else "–", lower_is_better=False),
+    ])], style={"backgroundColor": CARD_BG, "border": f"1px solid {GRID}", "borderRadius": "10px"})
+
+    # ── Radar workout overlay ──────────────────────────────────────────────────
+    vals_a = [ra.get(c, 0) or 0 for c in WORKOUT_COLS]
+    vals_b = [rb.get(c, 0) or 0 for c in WORKOUT_COLS]
+    vmin, vmax = min(vals_a + vals_b), max(vals_a + vals_b)
+    norm_a = [(v - vmin) / (vmax - vmin + 1) * 10 for v in vals_a]
+    norm_b = [(v - vmin) / (vmax - vmin + 1) * 10 for v in vals_b]
+    fig_radar = go.Figure()
+    fig_radar.add_trace(go.Scatterpolar(
+        r=norm_a + [norm_a[0]], theta=WORKOUT_LABELS + [WORKOUT_LABELS[0]],
+        fill="toself", name=sa, line=dict(color=ACCENT), fillcolor="rgba(232,71,43,0.2)",
+        hovertemplate=[f"{lbl}: {sec_to_mmss(v)}" for lbl, v in zip(WORKOUT_LABELS, vals_a)] + [""],
+    ))
+    fig_radar.add_trace(go.Scatterpolar(
+        r=norm_b + [norm_b[0]], theta=WORKOUT_LABELS + [WORKOUT_LABELS[0]],
+        fill="toself", name=sb, line=dict(color=BLUE), fillcolor="rgba(59,130,246,0.15)",
+        hovertemplate=[f"{lbl}: {sec_to_mmss(v)}" for lbl, v in zip(WORKOUT_LABELS, vals_b)] + [""],
+    ))
+    fig_radar.update_layout(
+        title=f"Stations Workout — {sa} vs {sb}",
+        polar=dict(radialaxis=dict(visible=False, gridcolor=GRID, color=SUBTEXT),
+                   bgcolor=PLOTBG, angularaxis=dict(color=SUBTEXT)),
+        **{k: v for k, v in CHART_LAYOUT.items() if k not in ["xaxis", "yaxis"]})
+
+    # ── Stations bar chart ────────────────────────────────────────────────────
+    fig_stations = go.Figure()
+    fig_stations.add_trace(go.Bar(
+        name=sa, x=WORKOUT_LABELS, y=[v/60 for v in vals_a], marker_color=ACCENT,
+        text=[sec_to_mmss(v) for v in vals_a], textposition="outside"))
+    fig_stations.add_trace(go.Bar(
+        name=sb, x=WORKOUT_LABELS, y=[v/60 for v in vals_b], marker_color=BLUE,
+        text=[sec_to_mmss(v) for v in vals_b], textposition="outside"))
+    fig_stations.update_layout(barmode="group", title="Temps par station",
+                                yaxis_title="Temps (min)", **CHART_LAYOUT)
+
+    # ── Runs bar chart ────────────────────────────────────────────────────────
+    run_cols_av = [c for c in RUN_COLS if c in df.columns]
+    runs_a = [ra.get(c, 0) or 0 for c in run_cols_av]
+    runs_b = [rb.get(c, 0) or 0 for c in run_cols_av]
+    fig_runs = go.Figure()
+    fig_runs.add_trace(go.Bar(
+        name=sa, x=RUN_LABELS[:len(runs_a)], y=[v/60 for v in runs_a],
+        marker_color=ACCENT, text=[sec_to_mmss(v) for v in runs_a], textposition="outside"))
+    fig_runs.add_trace(go.Bar(
+        name=sb, x=RUN_LABELS[:len(runs_b)], y=[v/60 for v in runs_b],
+        marker_color=BLUE, text=[sec_to_mmss(v) for v in runs_b], textposition="outside"))
+    fig_runs.update_layout(barmode="group", title="Splits Running",
+                            yaxis_title="Temps (min)", **CHART_LAYOUT)
+
+    # ── Verdict par discipline ────────────────────────────────────────────────
+    wins_a, wins_b = 0, 0
+    verdict_rows = []
+    for lbl, col in zip(WORKOUT_LABELS, WORKOUT_COLS):
+        va = ra.get(col); vb = rb.get(col)
+        if pd.notna(va) and pd.notna(vb):
+            winner = sa if va < vb else sb
+            color  = ACCENT if va < vb else BLUE
+            delta  = abs(int(va - vb))
+            verdict_rows.append(html.Tr([
+                html.Td(lbl, style={"color": TEXT, "padding": "6px 12px"}),
+                html.Td(sec_to_mmss(va), style={"color": ACCENT, "padding": "6px 12px", "textAlign": "center"}),
+                html.Td(sec_to_mmss(vb), style={"color": BLUE,   "padding": "6px 12px", "textAlign": "center"}),
+                html.Td(f"✓ {winner} (+{sec_to_mmss(delta)})",
+                        style={"color": color, "padding": "6px 12px", "textAlign": "center", "fontWeight": "700"}),
+            ], style={"borderBottom": f"1px solid {GRID}"}))
+            if va < vb: wins_a += 1
+            else:       wins_b += 1
+
+    # Running overall
+    ra_run = ra.get("Runs_Total_sec"); rb_run = rb.get("Runs_Total_sec")
+    if pd.notna(ra_run) and pd.notna(rb_run):
+        run_winner  = sa if ra_run < rb_run else sb
+        run_color   = ACCENT if ra_run < rb_run else BLUE
+        run_delta   = abs(int(ra_run - rb_run))
+        if ra_run < rb_run: wins_a += 1
+        else:               wins_b += 1
+        verdict_runs = html.Tr([
+            html.Td("Running total", style={"color": TEXT, "padding": "6px 12px"}),
+            html.Td(sec_to_mmss(ra_run), style={"color": ACCENT, "padding": "6px 12px", "textAlign": "center"}),
+            html.Td(sec_to_mmss(rb_run), style={"color": BLUE,   "padding": "6px 12px", "textAlign": "center"}),
+            html.Td(f"✓ {run_winner} (+{sec_to_mmss(run_delta)})",
+                    style={"color": run_color, "padding": "6px 12px", "textAlign": "center", "fontWeight": "700"}),
+        ], style={"borderBottom": f"1px solid {GRID}"})
+    else:
+        verdict_runs = None
+
+    verdict_winner = sa if wins_a > wins_b else (sb if wins_b > wins_a else "Égalité")
+    verdict_color  = ACCENT if wins_a > wins_b else (BLUE if wins_b > wins_a else ORANGE)
+    verdict_table = dbc.Card([dbc.CardBody([
+        html.H6("🏆 Verdict station par station",
+                style={"color": ACCENT, "textTransform": "uppercase", "letterSpacing": ".08em"}),
+        html.Table([
+            html.Thead(html.Tr([
+                html.Th(h, style={"color": SUBTEXT, "padding": "6px 12px"})
+                for h in ["Station", sa, sb, "Vainqueur"]
+            ]), style={"borderBottom": f"2px solid {ACCENT}"}),
+            html.Tbody(verdict_rows + ([verdict_runs] if verdict_runs else [])),
+        ], style={"width": "100%", "borderCollapse": "collapse"}),
+        html.Hr(style={"borderColor": GRID}),
+        dbc.Alert([
+            html.Strong(f"🏆 Vainqueur global : {verdict_winner} "),
+            html.Span(f"({wins_a} vs {wins_b} disciplines)"),
+        ], style={"backgroundColor": CARD_BG, "borderColor": verdict_color,
+                  "color": verdict_color, "fontWeight": "700", "fontSize": "1.1rem",
+                  "borderLeft": f"4px solid {verdict_color}"}),
+    ])], style={"backgroundColor": CARD_BG, "border": f"1px solid {GRID}", "borderRadius": "10px"})
+
+    return html.Div([
+        summary,
+        html.Div(style={"height": "16px"}),
+        dbc.Row([
+            dbc.Col(card(dcc.Graph(figure=fig_radar,    config={"displayModeBar": False})), md=5),
+            dbc.Col(card(dcc.Graph(figure=fig_stations, config={"displayModeBar": False})), md=7),
+        ], className="g-3 mb-3"),
+        dbc.Row([
+            dbc.Col(card(dcc.Graph(figure=fig_runs,     config={"displayModeBar": False})), md=12),
+        ], className="g-3 mb-3"),
+        verdict_table,
     ])
 
 
