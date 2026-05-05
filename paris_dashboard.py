@@ -806,7 +806,7 @@ def render_tab(tab, store):
             text=f"● France : {n_fr_solo} athlètes solo ({pct_fr_kpi}% des solos) — pays non renseigné pour les équipes",
             showarrow=False, font=dict(color=ACCENT, size=11), xanchor="center")
         fig_ctry.update_layout(**_lay(
-            f"Top 12 nationalités — {n_countries_real} pays représentés",
+            f"Top 12 nationalités · catégories solo uniquement — {n_countries_real} pays représentés",
             margin=dict(l=130, r=80, t=65, b=40),
             xaxis=dict(title="Athlètes", range=[0, top_countries["Athletes"].max()*1.25],
                        gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11)),
