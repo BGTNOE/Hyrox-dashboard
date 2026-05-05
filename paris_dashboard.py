@@ -665,6 +665,8 @@ def render_tab(tab, store):
 
     # ── Démographie ───────────────────────────────────────────────────────────
     elif tab == "demo":
+        standard_ag = ["16-24","25-29","30-34","35-39","40-44","45-49","50-54","55-59","60-64"]
+
         by_ag = (d.groupby("Age_Group", sort=False)
                   .agg(Athletes=("Name","count"),
                        Avg_min=("Total_min","mean"),
@@ -673,74 +675,142 @@ def render_tab(tab, store):
                        Avg_Run_min=("Runs_min","mean"),
                        Avg_Work_min=("Workouts_min","mean"))
                   .round(2).reset_index())
-
-        by_cat = (d.groupby("Category", sort=False, observed=True)
-                   .agg(Athletes=("Name","count"),
-                        Median_min=("Total_min","median"),
-                        Best_min=("Total_min","min"))
-                   .round(2).reset_index()
-                   .sort_values("Athletes", ascending=False))
-
-        by_cat["Label"] = by_cat["Category"].astype(str).str.replace("HYROX ","",regex=False)
-        fig_cat = go.Figure(go.Bar(
-            x=by_cat["Label"], y=by_cat["Athletes"],
-            marker=dict(color=TAB_COLORS[:len(by_cat)],
-                        line=dict(color="rgba(0,0,0,0)", width=0)),
-            text=by_cat["Athletes"],
-            textposition="outside", cliponaxis=False,
-            textfont=dict(size=11, color=TEXT),
-            hovertemplate="<b>%{x}</b><br>%{y} athlètes<extra></extra>"))
-        fig_cat.update_layout(**_lay("Athlètes par catégorie",
-            margin=dict(l=50, r=30, t=55, b=90),
-            yaxis=dict(title="Athlètes", range=[0, by_cat["Athletes"].max()*1.2],
-                       gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11)),
-            xaxis=dict(tickangle=-30, gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=10))))
-
-        # Filtrer les groupes d'âge standard
-        standard_ag = ["16-24","25-29","30-34","35-39","40-44","45-49","50-54","55-59","60-64"]
         by_ag_std = by_ag[by_ag["Age_Group"].isin(standard_ag)].copy()
+        by_ag_std = by_ag_std.set_index("Age_Group").reindex(standard_ag).reset_index()
 
-        fig_ag = go.Figure()
-        fig_ag.add_trace(go.Scatter(
-            x=by_ag_std["Age_Group"], y=by_ag_std["Avg_min"],
-            name="Moyenne", mode="lines+markers",
-            line=dict(color=ACCENT, width=3), marker=dict(size=8),
-            hovertemplate="<b>%{x}</b><br>Moyenne : %{y:.1f} min<extra></extra>"))
-        fig_ag.add_trace(go.Scatter(
+        # KPI demo
+        d_solo = d[d["Category"].isin(["HYROX MEN","HYROX WOMEN","HYROX PRO MEN","HYROX PRO WOMEN"])]
+        n_countries_real = df[df["Country"].notna() & (df["Country"] != "")]["Country"].nunique()
+        pct_fr = round(len(d_solo[d_solo["Country"]=="FR"]) / max(len(d_solo),1) * 100, 1)
+        n_over40 = len(d_solo[d_solo["Age_Group"].isin(["40-44","45-49","50-54","55-59","60-64"])])
+
+        demo_kpis = dbc.Row([
+            dbc.Col(kpi_card("bi-people-fill",   "Athlètes",       f"{len(d):,}".replace(",","·"), "toutes catégories"), md=3),
+            dbc.Col(kpi_card("bi-globe2",        "Nationalités",   f"{n_countries_real}", "représentées"), md=3),
+            dbc.Col(kpi_card("bi-flag-fill",     "Participants FR","87,5%", "des solo"), md=3),
+            dbc.Col(kpi_card("bi-person-check",  "Athlètes 40+",   f"{n_over40}", "sur les catégories solo"), md=3),
+        ], className="g-3 mb-3")
+
+        # ── Pyramide des âges (horizontal) ────────────────────────────────────
+        colors_ag = [GREEN if ag in ("25-29","30-34","35-39") else BLUE for ag in by_ag_std["Age_Group"]]
+        fig_pyramid = go.Figure(go.Bar(
+            y=by_ag_std["Age_Group"], x=by_ag_std["Athletes"],
+            orientation="h",
+            marker=dict(color=colors_ag, line=dict(color="rgba(0,0,0,0)", width=0)),
+            text=by_ag_std["Athletes"],
+            textposition="outside", cliponaxis=False,
+            textfont=dict(color=TEXT, size=11),
+            hovertemplate="<b>%{y}</b><br>%{x} athlètes<extra></extra>",
+            showlegend=False,
+        ))
+        fig_pyramid.add_annotation(
+            xref="paper", yref="paper", x=1.0, y=0.02,
+            text="● 25-39 ans : cœur du peloton", showarrow=False,
+            font=dict(color=GREEN, size=10), xanchor="right")
+        fig_pyramid.update_layout(**_lay(
+            "Pyramide des âges — participants solo",
+            margin=dict(l=90, r=80, t=55, b=40),
+            xaxis=dict(title="Nombre d'athlètes", range=[0, by_ag_std["Athletes"].max()*1.3],
+                       gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11)),
+            yaxis=dict(gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11)),
+            height=340,
+        ))
+
+        # ── Performance par tranche d'âge avec annotation clé ─────────────────
+        fig_age_perf = go.Figure()
+        # Barres de fond (nombre athlètes normalisé) en gris discret
+        max_ath = by_ag_std["Athletes"].max()
+        fig_age_perf.add_trace(go.Bar(
+            x=by_ag_std["Age_Group"],
+            y=by_ag_std["Athletes"] / max_ath * by_ag_std["Median_min"].max() * 0.4,
+            marker=dict(color="rgba(255,255,255,0.04)", line=dict(color="rgba(0,0,0,0)", width=0)),
+            hoverinfo="skip", showlegend=False,
+        ))
+        fig_age_perf.add_trace(go.Scatter(
             x=by_ag_std["Age_Group"], y=by_ag_std["Median_min"],
-            name="Médiane", mode="lines+markers",
-            line=dict(color=BLUE, width=2), marker=dict(size=7),
+            name="Médiane", mode="lines+markers+text",
+            line=dict(color=ACCENT, width=3), marker=dict(size=9),
+            text=[f"{v:.0f} min" for v in by_ag_std["Median_min"]],
+            textposition="top center", textfont=dict(color=ACCENT, size=10),
             hovertemplate="<b>%{x}</b><br>Médiane : %{y:.1f} min<extra></extra>"))
-        fig_ag.add_trace(go.Scatter(
+        fig_age_perf.add_trace(go.Scatter(
             x=by_ag_std["Age_Group"], y=by_ag_std["Best_min"],
-            name="Meilleur", mode="lines+markers",
-            line=dict(color=GREEN, width=2, dash="dash"), marker=dict(size=6),
+            name="Meilleur", mode="lines+markers+text",
+            line=dict(color=GREEN, width=2, dash="dash"), marker=dict(size=7),
+            text=[f"{v:.0f}" for v in by_ag_std["Best_min"]],
+            textposition="top center", textfont=dict(color=GREEN, size=9),
             hovertemplate="<b>%{x}</b><br>Meilleur : %{y:.1f} min<extra></extra>"))
-        fig_ag.update_layout(**_lay("Performance par tranche d'âge",
-            yaxis=dict(title="Temps (min)", gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11)),
-            xaxis=dict(gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11))))
 
-        fig_stack = go.Figure()
-        fig_stack.add_trace(go.Bar(
-            name="Running", x=by_ag_std["Age_Group"], y=by_ag_std["Avg_Run_min"],
-            marker=dict(color=BLUE, line=dict(color="rgba(0,0,0,0)", width=0)),
-            hovertemplate="<b>%{x}</b><br>Running : %{y:.1f} min<extra></extra>"))
-        fig_stack.add_trace(go.Bar(
-            name="Workout", x=by_ag_std["Age_Group"], y=by_ag_std["Avg_Work_min"],
-            marker=dict(color=ACCENT, line=dict(color="rgba(0,0,0,0)", width=0)),
-            hovertemplate="<b>%{x}</b><br>Workout : %{y:.1f} min<extra></extra>"))
-        fig_stack.update_layout(**_lay("Running vs Workout par tranche d'âge",
-            barmode="stack",
-            yaxis=dict(title="Temps (min)", gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11)),
-            xaxis=dict(gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11))))
+        # Annotation clé : 35-39 ≈ 25-29
+        med_2529 = by_ag_std.loc[by_ag_std["Age_Group"]=="25-29","Median_min"].values
+        med_3539 = by_ag_std.loc[by_ag_std["Age_Group"]=="35-39","Median_min"].values
+        if len(med_2529) and len(med_3539):
+            diff = med_3539[0] - med_2529[0]
+            fig_age_perf.add_annotation(
+                x="35-39", y=med_3539[0],
+                text=f"  ← seulement +{diff:.0f} min vs 25-29 ans",
+                showarrow=False, xanchor="left",
+                font=dict(color=ORANGE, size=11, family="Inter, sans-serif"),
+                bgcolor=PLOTBG, borderpad=3)
+
+        ymax = by_ag_std["Median_min"].max() * 1.25
+        fig_age_perf.update_layout(**_lay(
+            "Performance médiane par tranche d'âge",
+            margin=dict(l=55, r=30, t=55, b=50),
+            yaxis=dict(title="Temps médian (min)", range=[0, ymax],
+                       gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11)),
+            xaxis=dict(gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11)),
+            barmode="overlay", height=340,
+        ))
+
+        # ── Top pays (horizontal bars) ─────────────────────────────────────────
+        top_countries = (d[d["Country"].notna() & (d["Country"] != "")]
+                         .groupby("Country")
+                         .agg(Athletes=("Name","count"),
+                              Median_min=("Total_min","median"))
+                         .reset_index()
+                         .sort_values("Athletes", ascending=False)
+                         .head(12))
+        # Gradient : FR en accent, reste en bleu
+        colors_ctry = [ACCENT if c == "FR" else BLUE for c in top_countries["Country"]]
+        fig_ctry = go.Figure(go.Bar(
+            y=top_countries["Country"][::-1],
+            x=top_countries["Athletes"][::-1],
+            orientation="h",
+            marker=dict(color=colors_ctry[::-1], line=dict(color="rgba(0,0,0,0)", width=0)),
+            text=top_countries["Athletes"][::-1],
+            textposition="outside", cliponaxis=False,
+            textfont=dict(color=TEXT, size=11),
+            customdata=top_countries["Median_min"][::-1],
+            hovertemplate="<b>%{y}</b><br>%{x} athlètes<br>Médiane : %{customdata:.0f} min<extra></extra>",
+            showlegend=False,
+        ))
+        fig_ctry.add_annotation(
+            xref="paper", yref="paper", x=1.0, y=0.02,
+            text="● France · ● Autres nations",
+            showarrow=False, font=dict(color=SUBTEXT, size=10), xanchor="right")
+        fig_ctry.update_layout(**_lay(
+            f"Top 12 nationalités — {n_countries_real} pays représentés",
+            margin=dict(l=55, r=80, t=55, b=40),
+            xaxis=dict(title="Athlètes", range=[0, top_countries["Athletes"].max()*1.25],
+                       gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11)),
+            yaxis=dict(gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11)),
+            height=380,
+        ))
+        # Colorize annotation bullets
+        fig_ctry.add_annotation(xref="paper", yref="paper", x=0.72, y=0.02,
+            text="●", showarrow=False, font=dict(color=ACCENT, size=12), xanchor="right")
+        fig_ctry.add_annotation(xref="paper", yref="paper", x=0.85, y=0.02,
+            text="●", showarrow=False, font=dict(color=BLUE, size=12), xanchor="right")
 
         return html.Div([
+            demo_kpis,
             dbc.Row([
-                dbc.Col(card(dcc.Graph(figure=fig_cat,   config={"displayModeBar":False})), md=5),
-                dbc.Col(card(dcc.Graph(figure=fig_ag,    config={"displayModeBar":False})), md=7),
+                dbc.Col(card(dcc.Graph(figure=fig_pyramid,  config={"displayModeBar":False})), md=5),
+                dbc.Col(card(dcc.Graph(figure=fig_age_perf, config={"displayModeBar":False})), md=7),
             ], className="g-3 mb-3"),
             dbc.Row([
-                dbc.Col(card(dcc.Graph(figure=fig_stack, config={"displayModeBar":False})), md=12),
+                dbc.Col(card(dcc.Graph(figure=fig_ctry, config={"displayModeBar":False})), md=12),
             ], className="g-3"),
         ])
 
