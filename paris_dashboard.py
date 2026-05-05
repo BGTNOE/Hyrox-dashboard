@@ -864,7 +864,7 @@ def render_tab(tab, store):
             showarrow=False, font=dict(color=GREEN, size=11),
             bgcolor=PLOTBG, borderpad=4)
         fig_pace.update_layout(**_lay("Évolution du pace Run 1→8 par niveau de performance",
-            yaxis=dict(title="Pace (min/km)", autorange="reversed",
+            yaxis=dict(title="Pace (min/km)",
                        gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11)),
             xaxis=dict(gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11)),
             margin=dict(l=60, r=30, t=65, b=50)))
