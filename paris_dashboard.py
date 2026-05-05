@@ -847,11 +847,15 @@ def render_tab(tab, store):
             if len(sub) == 0: continue
             paces = [sub[c].median() for c in rc]
             all_paces[lbl] = paces
+            pace_vals = [p/60 for p in paces]
             fig_pace.add_trace(go.Scatter(
-                x=RUN_LABELS[:len(paces)], y=[p/60 for p in paces],
-                mode="lines+markers", name=lbl,
+                x=RUN_LABELS[:len(paces)], y=pace_vals,
+                mode="lines+markers+text", name=lbl,
                 line=dict(color=col, width=width, dash=dash),
                 marker=dict(size=9, symbol="circle"),
+                text=[f"{v:.2f}" for v in pace_vals],
+                textposition="top center",
+                textfont=dict(color=col, size=10),
                 hovertemplate=f"<b>{lbl} · %{{x}}</b><br>%{{y:.2f}} min/km<extra></extra>"))
         # Annotation Run 2 effet propulsion
         fig_pace.add_annotation(
