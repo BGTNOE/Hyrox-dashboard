@@ -741,18 +741,18 @@ def render_tab(tab, store):
             x=by_ag_std["Age_Group"], y=by_ag_std["Median_min"],
             name="Médiane", mode="lines+markers+text",
             line=dict(color=ACCENT, width=3), marker=dict(size=9),
-            text=[f"{int(v)}:{int((v%1)*60):02d}" for v in by_ag_std["Median_min"]],
+            text=[f"{int(v)}:{round((v%1)*60):02d}" for v in by_ag_std["Median_min"]],
             textposition="top center", textfont=dict(color=ACCENT, size=10),
             hovertemplate="<b>%{x}</b><br>Médiane : %{customdata}<extra></extra>",
-            customdata=[f"{int(v)}:{int((v%1)*60):02d}" for v in by_ag_std["Median_min"]]))
+            customdata=[f"{int(v)}:{round((v%1)*60):02d}" for v in by_ag_std["Median_min"]]))
         fig_age_perf.add_trace(go.Scatter(
             x=by_ag_std["Age_Group"], y=by_ag_std["Best_min"],
             name="Meilleur", mode="lines+markers+text",
             line=dict(color=GREEN, width=2, dash="dash"), marker=dict(size=7),
-            text=[f"{int(v)}:{int((v%1)*60):02d}" for v in by_ag_std["Best_min"]],
+            text=[f"{int(v)}:{round((v%1)*60):02d}" for v in by_ag_std["Best_min"]],
             textposition="top center", textfont=dict(color=GREEN, size=9),
             hovertemplate="<b>%{x}</b><br>Meilleur : %{customdata}<extra></extra>",
-            customdata=[f"{int(v)}:{int((v%1)*60):02d}" for v in by_ag_std["Best_min"]]))
+            customdata=[f"{int(v)}:{round((v%1)*60):02d}" for v in by_ag_std["Best_min"]]))
 
         # Annotation clé : 35-39 ≈ 25-29
         med_2529 = by_ag_std.loc[by_ag_std["Age_Group"]=="25-29","Median_min"].values
@@ -760,9 +760,11 @@ def render_tab(tab, store):
         if len(med_2529) and len(med_3539):
             diff = med_3539[0] - med_2529[0]
             fig_age_perf.add_annotation(
-                x="35-39", y=med_3539[0],
-                text=f"  ← seulement +{diff:.0f} min vs 25-29 ans",
-                showarrow=False, xanchor="left",
+                x="35-39", y=med_3539[0] + 4,
+                text=f"seulement +{diff:.0f} min vs 25-29 ans",
+                showarrow=True, ax=60, ay=-30,
+                arrowcolor=ORANGE, arrowwidth=1.5, arrowhead=2,
+                xanchor="left",
                 font=dict(color=ORANGE, size=11, family="Inter, sans-serif"),
                 bgcolor=PLOTBG, borderpad=3)
 
