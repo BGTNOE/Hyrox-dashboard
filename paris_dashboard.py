@@ -676,7 +676,9 @@ def render_tab(tab, store):
         }
         standard_ag = ["16-24","25-29","30-34","35-39","40-44","45-49","50-54","55-59","60-64"]
 
-        by_ag = (d.groupby("Age_Group", sort=False)
+        # Toujours calculer sur solo uniquement pour éviter le mélange avec les équipes
+        d_solo = d[d["Category"].isin(["HYROX MEN","HYROX WOMEN","HYROX PRO MEN","HYROX PRO WOMEN"])]
+        by_ag = (d_solo.groupby("Age_Group", sort=False)
                   .agg(Athletes=("Name","count"),
                        Avg_min=("Total_min","mean"),
                        Best_min=("Total_min","min"),
@@ -686,9 +688,6 @@ def render_tab(tab, store):
                   .round(2).reset_index())
         by_ag_std = by_ag[by_ag["Age_Group"].isin(standard_ag)].copy()
         by_ag_std = by_ag_std.set_index("Age_Group").reindex(standard_ag).reset_index()
-
-        # KPI demo
-        d_solo = d[d["Category"].isin(["HYROX MEN","HYROX WOMEN","HYROX PRO MEN","HYROX PRO WOMEN"])]
         n_countries_real = df[df["Country"].notna() & (df["Country"] != "")]["Country"].nunique()
         pct_fr = round(len(d_solo[d_solo["Country"]=="FR"]) / max(len(d_solo),1) * 100, 1)
         n_over40 = len(d_solo[d_solo["Age_Group"].isin(["40-44","45-49","50-54","55-59","60-64"])])
@@ -742,16 +741,18 @@ def render_tab(tab, store):
             x=by_ag_std["Age_Group"], y=by_ag_std["Median_min"],
             name="Médiane", mode="lines+markers+text",
             line=dict(color=ACCENT, width=3), marker=dict(size=9),
-            text=[f"{v:.0f} min" for v in by_ag_std["Median_min"]],
+            text=[f"{int(v)}:{int((v%1)*60):02d}" for v in by_ag_std["Median_min"]],
             textposition="top center", textfont=dict(color=ACCENT, size=10),
-            hovertemplate="<b>%{x}</b><br>Médiane : %{y:.1f} min<extra></extra>"))
+            hovertemplate="<b>%{x}</b><br>Médiane : %{customdata}<extra></extra>",
+            customdata=[f"{int(v)}:{int((v%1)*60):02d}" for v in by_ag_std["Median_min"]]))
         fig_age_perf.add_trace(go.Scatter(
             x=by_ag_std["Age_Group"], y=by_ag_std["Best_min"],
             name="Meilleur", mode="lines+markers+text",
             line=dict(color=GREEN, width=2, dash="dash"), marker=dict(size=7),
-            text=[f"{v:.2f}" for v in by_ag_std["Best_min"]],
+            text=[f"{int(v)}:{int((v%1)*60):02d}" for v in by_ag_std["Best_min"]],
             textposition="top center", textfont=dict(color=GREEN, size=9),
-            hovertemplate="<b>%{x}</b><br>Meilleur : %{y:.2f} min<extra></extra>"))
+            hovertemplate="<b>%{x}</b><br>Meilleur : %{customdata}<extra></extra>",
+            customdata=[f"{int(v)}:{int((v%1)*60):02d}" for v in by_ag_std["Best_min"]]))
 
         # Annotation clé : 35-39 ≈ 25-29
         med_2529 = by_ag_std.loc[by_ag_std["Age_Group"]=="25-29","Median_min"].values
