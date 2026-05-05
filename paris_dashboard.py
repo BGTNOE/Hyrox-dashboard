@@ -676,16 +676,20 @@ def render_tab(tab, store):
         }
         standard_ag = ["16-24","25-29","30-34","35-39","40-44","45-49","50-54","55-59","60-64"]
 
-        # Toujours calculer sur solo uniquement pour éviter le mélange avec les équipes
+        # Médiane/athletes sur solo, Best sur toutes catégories
         d_solo = d[d["Category"].isin(["HYROX MEN","HYROX WOMEN","HYROX PRO MEN","HYROX PRO WOMEN"])]
-        by_ag = (d_solo.groupby("Age_Group", sort=False)
+        by_ag = (d_solo.groupby("Age_Group", sort=False, observed=True)
                   .agg(Athletes=("Name","count"),
                        Avg_min=("Total_min","mean"),
-                       Best_min=("Total_min","min"),
                        Median_min=("Total_min","median"),
                        Avg_Run_min=("Runs_min","mean"),
                        Avg_Work_min=("Workouts_min","mean"))
                   .round(2).reset_index())
+        # Best time sur toutes catégories confondues
+        best_ag = (d.groupby("Age_Group", sort=False, observed=True)
+                    .agg(Best_min=("Total_min","min"))
+                    .round(2).reset_index())
+        by_ag = by_ag.merge(best_ag, on="Age_Group", how="left")
         by_ag_std = by_ag[by_ag["Age_Group"].isin(standard_ag)].copy()
         by_ag_std = by_ag_std.set_index("Age_Group").reindex(standard_ag).reset_index()
         n_countries_real = df[df["Country"].notna() & (df["Country"] != "")]["Country"].nunique()
