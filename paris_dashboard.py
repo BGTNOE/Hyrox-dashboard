@@ -774,21 +774,19 @@ def render_tab(tab, store):
             barmode="overlay", height=340,
         ))
 
-        # ── Top pays (horizontal bars) — sur athlètes uniques solo ───────────
-        # Compter les athlètes uniques (évite le double-comptage des équipes)
-        d_solo_ctry = df[df["Category"].isin(["HYROX MEN","HYROX WOMEN","HYROX PRO MEN","HYROX PRO WOMEN"])]
-        d_solo_ctry = d_solo_ctry[d_solo_ctry["Country"].notna() & (d_solo_ctry["Country"] != "") & (d_solo_ctry["Country"] != "XX")]
-        top_countries = (d_solo_ctry
+        # ── Top pays (horizontal bars) — toutes catégories ────────────────────
+        d_all_ctry = d[d["Country"].notna() & (d["Country"] != "") & (d["Country"] != "XX")]
+        top_countries = (d_all_ctry
                          .groupby("Country")
                          .agg(Athletes=("Name","count"),
                               Median_min=("Total_min","median"))
                          .reset_index()
                          .sort_values("Athletes", ascending=False)
                          .head(12))
-        # Noms complets
         top_countries["Country_Name"] = top_countries["Country"].map(COUNTRY_NAMES).fillna(top_countries["Country"])
-        colors_ctry = [ACCENT if c == "FR" else BLUE for c in top_countries["Country"]]
         tc_rev = top_countries.iloc[::-1].reset_index(drop=True)
+        n_all_ctry = len(d_all_ctry)
+        pct_fr_all = round(len(d_all_ctry[d_all_ctry["Country"]=="FR"]) / n_all_ctry * 100, 1)
         fig_ctry = go.Figure(go.Bar(
             y=tc_rev["Country_Name"],
             x=tc_rev["Athletes"],
@@ -799,17 +797,15 @@ def render_tab(tab, store):
             textposition="outside", cliponaxis=False,
             textfont=dict(color=TEXT, size=11),
             customdata=tc_rev["Median_min"],
-            hovertemplate="<b>%{y}</b><br>%{x} athlètes solo<br>Médiane : %{customdata:.0f} min<extra></extra>",
+            hovertemplate="<b>%{y}</b><br>%{x} athlètes<br>Médiane : %{customdata:.0f} min<extra></extra>",
             showlegend=False,
         ))
-        n_solo_total = len(d_solo_ctry)
-        pct_fr_real = round(len(d_solo_ctry[d_solo_ctry["Country"]=="FR"]) / n_solo_total * 100, 1)
         fig_ctry.add_annotation(
             xref="paper", yref="paper", x=0.5, y=1.08,
-            text=f"● France : {pct_fr_real}% des {n_solo_total:,} participants solo".replace(",","·"),
+            text=f"● France : {pct_fr_all}% des participants · toutes catégories confondues",
             showarrow=False, font=dict(color=ACCENT, size=11), xanchor="center")
         fig_ctry.update_layout(**_lay(
-            f"Top 12 nationalités — {n_countries_real} pays représentés · catégories solo uniquement",
+            f"Top 12 nationalités — {n_countries_real} pays représentés",
             margin=dict(l=130, r=80, t=65, b=40),
             xaxis=dict(title="Athlètes", range=[0, top_countries["Athletes"].max()*1.25],
                        gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11)),
