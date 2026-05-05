@@ -665,6 +665,15 @@ def render_tab(tab, store):
 
     # ── Démographie ───────────────────────────────────────────────────────────
     elif tab == "demo":
+        COUNTRY_NAMES = {
+            "FR":"France","DE":"Allemagne","MA":"Maroc","GB":"Royaume-Uni","BE":"Belgique",
+            "NL":"Pays-Bas","US":"États-Unis","IT":"Italie","CH":"Suisse","DZ":"Algérie",
+            "ES":"Espagne","PT":"Portugal","CA":"Canada","AU":"Australie","SE":"Suède",
+            "NO":"Norvège","DK":"Danemark","AT":"Autriche","PL":"Pologne","IE":"Irlande",
+            "LU":"Luxembourg","ZA":"Afrique du Sud","SG":"Singapour","AE":"Émirats Arabes Unis",
+            "TN":"Tunisie","MX":"Mexique","BR":"Brésil","NZ":"Nouvelle-Zélande","JP":"Japon",
+            "XX":"Inconnu",
+        }
         standard_ag = ["16-24","25-29","30-34","35-39","40-44","45-49","50-54","55-59","60-64"]
 
         by_ag = (d.groupby("Age_Group", sort=False)
@@ -684,11 +693,13 @@ def render_tab(tab, store):
         pct_fr = round(len(d_solo[d_solo["Country"]=="FR"]) / max(len(d_solo),1) * 100, 1)
         n_over40 = len(d_solo[d_solo["Age_Group"].isin(["40-44","45-49","50-54","55-59","60-64"])])
 
+        n_solo_kpi = len(d_solo)
+        pct_fr_kpi = round(len(d_solo[d_solo["Country"]=="FR"]) / max(n_solo_kpi,1) * 100, 1)
         demo_kpis = dbc.Row([
-            dbc.Col(kpi_card("bi-people-fill",   "Athlètes",       f"{len(d):,}".replace(",","·"), "toutes catégories"), md=3),
-            dbc.Col(kpi_card("bi-globe2",        "Nationalités",   f"{n_countries_real}", "représentées"), md=3),
-            dbc.Col(kpi_card("bi-flag-fill",     "Participants FR","87,5%", "des solo"), md=3),
-            dbc.Col(kpi_card("bi-person-check",  "Athlètes 40+",   f"{n_over40}", "sur les catégories solo"), md=3),
+            dbc.Col(kpi_card("bi-people-fill",   "Participants solo", f"{n_solo_kpi:,}".replace(",","·"), "Men / Women / Pro"), md=3),
+            dbc.Col(kpi_card("bi-globe2",        "Nationalités",      f"{n_countries_real}", "représentées"), md=3),
+            dbc.Col(kpi_card("bi-flag-fill",     "Participants FR",   f"{pct_fr_kpi}%", "des catégories solo"), md=3),
+            dbc.Col(kpi_card("bi-person-check",  "Athlètes 40+",      f"{n_over40}", "participent en solo"), md=3),
         ], className="g-3 mb-3")
 
         # ── Pyramide des âges (horizontal) ────────────────────────────────────
@@ -763,45 +774,48 @@ def render_tab(tab, store):
             barmode="overlay", height=340,
         ))
 
-        # ── Top pays (horizontal bars) ─────────────────────────────────────────
-        top_countries = (d[d["Country"].notna() & (d["Country"] != "")]
+        # ── Top pays (horizontal bars) — sur athlètes uniques solo ───────────
+        # Compter les athlètes uniques (évite le double-comptage des équipes)
+        d_solo_ctry = df[df["Category"].isin(["HYROX MEN","HYROX WOMEN","HYROX PRO MEN","HYROX PRO WOMEN"])]
+        d_solo_ctry = d_solo_ctry[d_solo_ctry["Country"].notna() & (d_solo_ctry["Country"] != "") & (d_solo_ctry["Country"] != "XX")]
+        top_countries = (d_solo_ctry
                          .groupby("Country")
                          .agg(Athletes=("Name","count"),
                               Median_min=("Total_min","median"))
                          .reset_index()
                          .sort_values("Athletes", ascending=False)
                          .head(12))
-        # Gradient : FR en accent, reste en bleu
+        # Noms complets
+        top_countries["Country_Name"] = top_countries["Country"].map(COUNTRY_NAMES).fillna(top_countries["Country"])
         colors_ctry = [ACCENT if c == "FR" else BLUE for c in top_countries["Country"]]
+        tc_rev = top_countries.iloc[::-1].reset_index(drop=True)
         fig_ctry = go.Figure(go.Bar(
-            y=top_countries["Country"][::-1],
-            x=top_countries["Athletes"][::-1],
+            y=tc_rev["Country_Name"],
+            x=tc_rev["Athletes"],
             orientation="h",
-            marker=dict(color=colors_ctry[::-1], line=dict(color="rgba(0,0,0,0)", width=0)),
-            text=top_countries["Athletes"][::-1],
+            marker=dict(color=[ACCENT if c == "FR" else BLUE for c in tc_rev["Country"]],
+                        line=dict(color="rgba(0,0,0,0)", width=0)),
+            text=tc_rev["Athletes"],
             textposition="outside", cliponaxis=False,
             textfont=dict(color=TEXT, size=11),
-            customdata=top_countries["Median_min"][::-1],
-            hovertemplate="<b>%{y}</b><br>%{x} athlètes<br>Médiane : %{customdata:.0f} min<extra></extra>",
+            customdata=tc_rev["Median_min"],
+            hovertemplate="<b>%{y}</b><br>%{x} athlètes solo<br>Médiane : %{customdata:.0f} min<extra></extra>",
             showlegend=False,
         ))
+        n_solo_total = len(d_solo_ctry)
+        pct_fr_real = round(len(d_solo_ctry[d_solo_ctry["Country"]=="FR"]) / n_solo_total * 100, 1)
         fig_ctry.add_annotation(
-            xref="paper", yref="paper", x=1.0, y=0.02,
-            text="● France · ● Autres nations",
-            showarrow=False, font=dict(color=SUBTEXT, size=10), xanchor="right")
+            xref="paper", yref="paper", x=0.5, y=1.08,
+            text=f"● France : {pct_fr_real}% des {n_solo_total:,} participants solo".replace(",","·"),
+            showarrow=False, font=dict(color=ACCENT, size=11), xanchor="center")
         fig_ctry.update_layout(**_lay(
-            f"Top 12 nationalités — {n_countries_real} pays représentés",
-            margin=dict(l=55, r=80, t=55, b=40),
+            f"Top 12 nationalités — {n_countries_real} pays représentés · catégories solo uniquement",
+            margin=dict(l=130, r=80, t=65, b=40),
             xaxis=dict(title="Athlètes", range=[0, top_countries["Athletes"].max()*1.25],
                        gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11)),
-            yaxis=dict(gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11)),
-            height=380,
+            yaxis=dict(gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=12)),
+            height=400,
         ))
-        # Colorize annotation bullets
-        fig_ctry.add_annotation(xref="paper", yref="paper", x=0.72, y=0.02,
-            text="●", showarrow=False, font=dict(color=ACCENT, size=12), xanchor="right")
-        fig_ctry.add_annotation(xref="paper", yref="paper", x=0.85, y=0.02,
-            text="●", showarrow=False, font=dict(color=BLUE, size=12), xanchor="right")
 
         return html.Div([
             demo_kpis,
