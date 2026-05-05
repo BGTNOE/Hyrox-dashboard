@@ -749,9 +749,9 @@ def render_tab(tab, store):
             x=by_ag_std["Age_Group"], y=by_ag_std["Best_min"],
             name="Meilleur", mode="lines+markers+text",
             line=dict(color=GREEN, width=2, dash="dash"), marker=dict(size=7),
-            text=[f"{v:.0f}" for v in by_ag_std["Best_min"]],
+            text=[f"{v:.2f}" for v in by_ag_std["Best_min"]],
             textposition="top center", textfont=dict(color=GREEN, size=9),
-            hovertemplate="<b>%{x}</b><br>Meilleur : %{y:.1f} min<extra></extra>"))
+            hovertemplate="<b>%{x}</b><br>Meilleur : %{y:.2f} min<extra></extra>"))
 
         # Annotation clé : 35-39 ≈ 25-29
         med_2529 = by_ag_std.loc[by_ag_std["Age_Group"]=="25-29","Median_min"].values
