@@ -76,6 +76,26 @@ CHART_LAYOUT = dict(
 
 _dd_style = {"backgroundColor": CARD_BG, "color": TEXT, "border": f"1px solid {GRID}"}
 
+def _lay(title, margin=None, height=None, **kw):
+    """Layout Plotly uniforme pour tous les graphiques."""
+    m = margin or dict(l=60, r=30, t=55, b=50)
+    base = dict(
+        paper_bgcolor=PLOTBG, plot_bgcolor=PLOTBG,
+        font=dict(color=TEXT, family="Inter, sans-serif"),
+        xaxis=dict(gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11)),
+        yaxis=dict(gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11)),
+        legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color=TEXT, size=11),
+                    orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        hoverlabel=dict(bgcolor=CARD_BG, font_color=TEXT, font_size=12),
+        title=dict(text=title, font=dict(size=14, color=TEXT)),
+        margin=m,
+    )
+    if height: base["height"] = height
+    base.update(kw)
+    return base
+
+TAB_COLORS = [ACCENT, BLUE, GREEN, ORANGE, "#A855F7", "#EC4899", "#14B8A6", "#F97316"]
+
 def sec_to_mmss(s):
     if pd.isna(s): return "N/A"
     s = int(s)
@@ -299,59 +319,105 @@ def render_tab(tab, store):
 
     # ── Vue d'ensemble ────────────────────────────────────────────────────────
     if tab == "overview":
-        fig_hist = go.Figure(go.Histogram(x=d["Total_min"], nbinsx=60,
-                                          marker_color=ACCENT, opacity=0.85))
+        # Distribution temps finaux
+        fig_hist = go.Figure(go.Histogram(
+            x=d["Total_min"], nbinsx=60,
+            marker=dict(color=ACCENT, opacity=0.85, line=dict(color="rgba(0,0,0,0)", width=0)),
+            hovertemplate="Temps : %{x:.1f} min<br>Athlètes : %{y}<extra></extra>"))
         med = d["Total_min"].median()
-        fig_hist.add_vline(x=med, line_dash="dash", line_color=BLUE,
-                           annotation_text=f"Médiane {sec_to_mmss(med*60)}",
-                           annotation_font_color=BLUE)
-        fig_hist.update_layout(title="Distribution des temps finaux",
-                               xaxis_title="Temps (min)", yaxis_title="Athlètes", **CHART_LAYOUT)
+        fig_hist.add_vline(x=med, line_dash="dash", line_color=BLUE, line_width=2)
+        fig_hist.add_annotation(x=med, yref="paper", y=0.97,
+            text=f"Médiane : {sec_to_mmss(med*60)}",
+            showarrow=False, font=dict(color=BLUE, size=11),
+            bgcolor=PLOTBG, borderpad=3)
+        fig_hist.update_layout(**_lay("Distribution des temps finaux",
+            xaxis=dict(title="Temps (min)", gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11)),
+            yaxis=dict(title="Nombre d'athlètes", gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11))))
 
+        # Donut décomposition
+        run_m = d["Runs_min"].mean(); wk_m = d["Workouts_min"].mean(); rx_m = d["Roxzone_min"].mean()
         fig_donut = go.Figure(go.Pie(
             labels=["Running","Workout","Roxzone"],
-            values=[d["Runs_min"].mean(), d["Workouts_min"].mean(), d["Roxzone_min"].mean()],
-            hole=0.6, marker_colors=[ACCENT, BLUE, GREEN], textinfo="label+percent"))
-        fig_donut.update_layout(title="Décomposition moyenne", **CHART_LAYOUT)
+            values=[run_m, wk_m, rx_m],
+            hole=0.6,
+            marker=dict(colors=[BLUE, ACCENT, GREEN],
+                        line=dict(color=PLOTBG, width=2)),
+            textinfo="label+percent",
+            textfont=dict(size=12),
+            hovertemplate="<b>%{label}</b><br>%{value:.1f} min en moyenne<br>%{percent}<extra></extra>"))
+        fig_donut.add_annotation(text=f"{sec_to_mmss((run_m+wk_m+rx_m)*60)}<br><span style='font-size:10px'>temps moyen</span>",
+            x=0.5, y=0.5, showarrow=False, font=dict(size=13, color=TEXT), align="center")
+        fig_donut.update_layout(**_lay("Décomposition du temps de course",
+            margin=dict(l=20, r=20, t=55, b=20),
+            legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color=TEXT, size=11),
+                        orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.05)))
 
+        # Top 20
         top20 = d.head(20).copy()
-        top20["label"] = top20["Display_Name"].str.split(",").str[0].str.split().str[-1] \
-                         + " (" + top20["Country"] + ")"
+        top20["label"] = (top20["Display_Name"].str.split(",").str[0]
+                          .str.strip() + " (" + top20["Country"] + ")")
+        top20["rank_label"] = "#" + top20["Rank"].astype(str)
         fig_top = go.Figure(go.Bar(
             y=top20["label"][::-1], x=top20["Total_min"][::-1], orientation="h",
-            marker_color=ACCENT, text=top20["Finish_Time"][::-1], textposition="outside"))
-        fig_top.update_layout(title="Top 20 athlètes", xaxis_title="Temps (min)",
-                              height=550, **CHART_LAYOUT)
+            marker=dict(
+                color=list(range(20, 0, -1)),
+                colorscale=[[0, CARD_BG], [1, ACCENT]],
+                showscale=False),
+            text=top20["Finish_Time"][::-1],
+            textposition="outside", cliponaxis=False,
+            textfont=dict(size=11, color=TEXT),
+            hovertemplate="<b>%{y}</b><br>Temps : %{text}<extra></extra>"))
+        fig_top.update_layout(**_lay("Top 20 athlètes",
+            margin=dict(l=180, r=80, t=55, b=40), height=560,
+            xaxis=dict(title="Temps (min)", range=[0, top20["Total_min"].max()*1.18],
+                       gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11)),
+            yaxis=dict(gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11))))
 
+        # Scatter Running vs Workout
         ds = sample_df(d)
         fig_scat = px.scatter(ds, x="Runs_min", y="Workouts_min", color="Age_Group",
                               hover_name="Display_Name",
-                              labels={"Runs_min":"Running (min)","Workouts_min":"Workout (min)"},
-                              title=f"Running vs Workout ({len(ds):,} pts)".replace(",","·"),
+                              hover_data={"Runs_min":":.1f","Workouts_min":":.1f","Age_Group":False},
+                              labels={"Runs_min":"Running (min)","Workouts_min":"Workout (min)",
+                                      "Age_Group":"Tranche d'âge"},
                               color_discrete_sequence=COLORS)
-        fig_scat.update_layout(**CHART_LAYOUT)
-        fig_scat.update_traces(marker=dict(size=4, opacity=0.6))
+        fig_scat.update_traces(marker=dict(size=4, opacity=0.55))
+        fig_scat.update_layout(**_lay(f"Running vs Workout · {len(ds):,} athlètes".replace(",","·")))
 
         # Balance Score
         bal = d["Balance_Score"].dropna()
         avg_bal = bal.mean()
-        fig_bal = go.Figure()
-        fig_bal.add_trace(go.Histogram(x=bal, nbinsx=40, marker_color=BLUE, opacity=0.8))
-        fig_bal.add_vline(x=avg_bal, line_dash="dash", line_color=ACCENT,
-                          annotation_text=f"Moy {avg_bal:.1f}%", annotation_font_color=ACCENT)
-        fig_bal.add_vline(x=50, line_dash="dot", line_color=GREEN,
-                          annotation_text="Équilibre 50%", annotation_font_color=GREEN)
-        fig_bal.update_layout(title="Score équilibre Running/Workout (% en running)",
-                              xaxis_title="% running", yaxis_title="Athlètes", **CHART_LAYOUT)
+        fig_bal = go.Figure(go.Histogram(
+            x=bal, nbinsx=40,
+            marker=dict(color=BLUE, opacity=0.8, line=dict(color="rgba(0,0,0,0)", width=0)),
+            hovertemplate="%{x:.1f}% running<br>%{y} athlètes<extra></extra>"))
+        fig_bal.add_vline(x=avg_bal, line_dash="dash", line_color=ACCENT, line_width=2)
+        fig_bal.add_vline(x=50,      line_dash="dot",  line_color=GREEN,  line_width=1.5)
+        fig_bal.add_annotation(x=avg_bal, yref="paper", y=0.92,
+            text=f"Moyenne : {avg_bal:.1f}%", showarrow=False,
+            font=dict(color=ACCENT, size=11), bgcolor=PLOTBG, borderpad=3)
+        fig_bal.add_annotation(x=50, yref="paper", y=0.75,
+            text="Équilibre 50%", showarrow=False,
+            font=dict(color=GREEN, size=11), bgcolor=PLOTBG, borderpad=3)
+        fig_bal.update_layout(**_lay("Running/Workout Balance Score (% du temps en running)",
+            xaxis=dict(title="% running", gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11)),
+            yaxis=dict(title="Athlètes", gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11))))
 
+        # Profils
         n_runners  = int((bal > 55).sum())
         n_balanced = int(((bal >= 45) & (bal <= 55)).sum())
         n_workers  = int((bal < 45).sum())
         fig_prof = go.Figure(go.Pie(
-            labels=["Runners (>55%)","Équilibrés (45-55%)","Workers (<45%)"],
+            labels=[f"Runners<br>>55%", f"Équilibrés<br>45-55%", f"Workers<br><45%"],
             values=[n_runners, n_balanced, n_workers],
-            hole=0.55, marker_colors=[BLUE, GREEN, ACCENT], textinfo="label+percent"))
-        fig_prof.update_layout(title="Répartition des profils", **CHART_LAYOUT)
+            hole=0.55,
+            marker=dict(colors=[BLUE, GREEN, ACCENT], line=dict(color=PLOTBG, width=2)),
+            textinfo="percent", textfont=dict(size=12),
+            hovertemplate="<b>%{label}</b><br>%{value} athlètes (%{percent})<extra></extra>"))
+        fig_prof.update_layout(**_lay("Répartition des profils",
+            margin=dict(l=20, r=20, t=55, b=20),
+            legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color=TEXT, size=11),
+                        orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.05)))
 
         return html.Div([
             dbc.Row([
@@ -372,33 +438,60 @@ def render_tab(tab, store):
     elif tab == "workouts":
         avgs = [d[c].mean() for c in WORKOUT_COLS if c in d.columns]
         labs = WORKOUT_LABELS[:len(avgs)]
-        fig_bar = go.Figure(go.Bar(x=labs, y=[a/60 for a in avgs], marker_color=ACCENT,
-                                   text=[sec_to_mmss(a) for a in avgs], textposition="outside"))
-        fig_bar.update_layout(title="Temps moyen par station", yaxis_title="Temps (min)", **CHART_LAYOUT)
+        max_avg = max(avgs) / 60 if avgs else 10
+
+        fig_bar = go.Figure(go.Bar(
+            x=labs, y=[a/60 for a in avgs],
+            marker=dict(color=TAB_COLORS[:len(labs)], line=dict(color="rgba(0,0,0,0)", width=0)),
+            text=[sec_to_mmss(a) for a in avgs],
+            textposition="outside", cliponaxis=False,
+            textfont=dict(size=12, color=TEXT),
+            hovertemplate="<b>%{x}</b><br>Temps moyen : %{text}<extra></extra>"))
+        fig_bar.update_layout(**_lay("Temps moyen par station",
+            yaxis=dict(title="Temps (min)", range=[0, max_avg*1.22],
+                       gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11)),
+            xaxis=dict(gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11))))
 
         fig_box = go.Figure()
-        for col, label in zip(WORKOUT_COLS, WORKOUT_LABELS):
-            if col in d.columns:
-                fig_box.add_trace(go.Box(y=d[col].dropna()/60, name=label,
-                                         marker_color=ACCENT, boxmean=True))
-        fig_box.update_layout(title="Distribution par station", yaxis_title="Temps (min)",
-                               showlegend=False, **CHART_LAYOUT)
+        for i, (col, label) in enumerate(zip(WORKOUT_COLS, WORKOUT_LABELS)):
+            if col not in d.columns: continue
+            col_c = TAB_COLORS[i % len(TAB_COLORS)]
+            fig_box.add_trace(go.Box(
+                y=d[col].dropna()/60, name=label,
+                marker=dict(color=col_c, opacity=0.7, size=3),
+                line=dict(color=col_c),
+                boxmean="sd",
+                hovertemplate=f"<b>{label}</b><br>%{{y:.2f}} min<extra></extra>"))
+        fig_box.update_layout(**_lay("Distribution des temps par station",
+            yaxis=dict(title="Temps (min)", gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11)),
+            xaxis=dict(gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=10)),
+            showlegend=False))
 
         cols_c = [c for c in WORKOUT_COLS if c in d.columns]
         corr = d[cols_c].corr()
         corr.index = corr.columns = WORKOUT_LABELS[:len(cols_c)]
         fig_corr = px.imshow(corr, text_auto=".2f", color_continuous_scale="RdBu_r",
-                             zmin=-1, zmax=1, title="Corrélations entre stations")
-        fig_corr.update_layout(**CHART_LAYOUT)
+                             zmin=-1, zmax=1)
+        fig_corr.update_layout(**_lay("Corrélations entre stations",
+            margin=dict(l=110, r=20, t=55, b=110),
+            coloraxis_colorbar=dict(title="r", tickfont=dict(color=TEXT),
+                                    titlefont=dict(color=TEXT), len=0.8)))
 
         score_avgs = [d[c].mean() for c in SCORE_COLS if c in d.columns]
         fig_score = go.Figure(go.Bar(
             x=WORKOUT_LABELS[:len(score_avgs)], y=score_avgs,
-            marker=dict(color=score_avgs, colorscale=[[0,"#EF4444"],[0.5,ORANGE],[1,GREEN]],
-                        showscale=True, cmin=0, cmax=100),
-            text=[f"{s:.1f}" for s in score_avgs], textposition="outside"))
-        sl = {**CHART_LAYOUT, "yaxis":{**CHART_LAYOUT.get("yaxis",{}),"range":[0,105]}}
-        fig_score.update_layout(title="Score moyen par station", **sl)
+            marker=dict(color=score_avgs,
+                        colorscale=[[0,"#EF4444"],[0.5,ORANGE],[1,GREEN]],
+                        showscale=False, cmin=0, cmax=100,
+                        line=dict(color="rgba(0,0,0,0)", width=0)),
+            text=[f"{s:.0f}/100" for s in score_avgs],
+            textposition="outside", cliponaxis=False,
+            textfont=dict(size=12, color=TEXT),
+            hovertemplate="<b>%{x}</b><br>Score : %{y:.1f}/100<extra></extra>"))
+        fig_score.update_layout(**_lay("Score moyen par station (0 = très lent · 100 = élite)",
+            yaxis=dict(title="Score /100", range=[0, 115],
+                       gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11)),
+            xaxis=dict(gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11))))
 
         return html.Div([
             dbc.Row([
@@ -413,37 +506,71 @@ def render_tab(tab, store):
 
     # ── Running ───────────────────────────────────────────────────────────────
     elif tab == "running":
-        run_avgs = [d[c].mean() for c in RUN_COLS if c in d.columns]
+        rc_avail = [c for c in RUN_COLS if c in d.columns]
+        run_avgs = [d[c].mean() for c in rc_avail]
+        max_run  = max(run_avgs) / 60 if run_avgs else 6
+
         fig_run = go.Figure(go.Bar(
             x=RUN_LABELS[:len(run_avgs)], y=[a/60 for a in run_avgs],
-            marker_color=BLUE, text=[sec_to_mmss(a) for a in run_avgs], textposition="outside"))
-        fig_run.update_layout(title="Temps moyen par run", yaxis_title="Temps (min)", **CHART_LAYOUT)
+            marker=dict(
+                color=list(range(len(run_avgs))),
+                colorscale=[[0, BLUE],[1, "#93C5FD"]],
+                showscale=False,
+                line=dict(color="rgba(0,0,0,0)", width=0)),
+            text=[sec_to_mmss(a) for a in run_avgs],
+            textposition="outside", cliponaxis=False,
+            textfont=dict(size=12, color=TEXT),
+            hovertemplate="<b>%{x}</b><br>Temps moyen : %{text}<extra></extra>"))
+        fig_run.update_layout(**_lay("Temps moyen par kilomètre",
+            yaxis=dict(title="Temps (min)", range=[0, max_run*1.2],
+                       gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11)),
+            xaxis=dict(gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11))))
 
-        top10    = d.head(10)
-        med_r    = [d[c].median()/60    for c in RUN_COLS if c in d.columns]
-        top_r    = [top10[c].mean()/60  for c in RUN_COLS if c in d.columns]
-        bot_r    = [d.tail(100)[c].mean()/60 for c in RUN_COLS if c in d.columns]
+        top10 = d.head(10)
+        med_r = [d[c].median()/60    for c in rc_avail]
+        top_r = [top10[c].mean()/60  for c in rc_avail]
+        bot_r = [d.tail(100)[c].mean()/60 for c in rc_avail]
+        xlabs = RUN_LABELS[:len(med_r)]
+
         fig_lines = go.Figure()
-        fig_lines.add_trace(go.Scatter(x=RUN_LABELS[:len(top_r)], y=top_r, mode="lines+markers",
-                                       name="Top 10", line=dict(color=ACCENT,width=3)))
-        fig_lines.add_trace(go.Scatter(x=RUN_LABELS[:len(med_r)], y=med_r, mode="lines+markers",
-                                       name="Médiane", line=dict(color=BLUE,width=2)))
-        fig_lines.add_trace(go.Scatter(x=RUN_LABELS[:len(bot_r)], y=bot_r, mode="lines+markers",
-                                       name="Bas 100", line=dict(color=SUBTEXT,width=2,dash="dot")))
-        fig_lines.update_layout(title="Top 10 / Médiane / Bas 100",
-                                yaxis_title="Temps (min)", **CHART_LAYOUT)
+        # Zone ombrée entre top et bottom
+        fig_lines.add_trace(go.Scatter(
+            x=xlabs + xlabs[::-1],
+            y=top_r + bot_r[::-1],
+            fill="toself", fillcolor="rgba(59,130,246,0.08)",
+            line=dict(color="rgba(0,0,0,0)"), showlegend=False, hoverinfo="skip"))
+        fig_lines.add_trace(go.Scatter(
+            x=xlabs, y=top_r, mode="lines+markers", name="Top 10",
+            line=dict(color=ACCENT, width=3),
+            marker=dict(size=8, symbol="circle"),
+            hovertemplate="<b>Top 10 · %{x}</b><br>%{y:.2f} min<extra></extra>"))
+        fig_lines.add_trace(go.Scatter(
+            x=xlabs, y=med_r, mode="lines+markers", name="Médiane",
+            line=dict(color=BLUE, width=2),
+            marker=dict(size=7, symbol="circle"),
+            hovertemplate="<b>Médiane · %{x}</b><br>%{y:.2f} min<extra></extra>"))
+        fig_lines.add_trace(go.Scatter(
+            x=xlabs, y=bot_r, mode="lines+markers", name="Bas 100",
+            line=dict(color=SUBTEXT, width=2, dash="dot"),
+            marker=dict(size=6, symbol="circle-open"),
+            hovertemplate="<b>Bas 100 · %{x}</b><br>%{y:.2f} min<extra></extra>"))
+        fig_lines.update_layout(**_lay("Profils de course : Top 10 / Médiane / Bas 100",
+            yaxis=dict(title="Temps (min)", gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11)),
+            xaxis=dict(gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11)),
+            margin=dict(l=60, r=30, t=55, b=50)))
 
-        # Dégradation du rythme (run 1 vs run 8)
-        run_med = [d[c].median()/60 for c in RUN_COLS if c in d.columns]
+        run_med = [d[c].median()/60 for c in rc_avail]
         if len(run_med) >= 2:
             degradation = (run_med[-1] - run_med[0]) / run_med[0] * 100
-            deg_text = f"Dégradation Run 1→8 : +{degradation:.1f}% pour la médiane"
+            sign = "+" if degradation > 0 else ""
+            deg_text = f"Run 1→8 : {sign}{degradation:.1f}% d'écart (médiane) — Run 2 est souvent le plus rapide de la course"
         else:
             deg_text = ""
 
-        insight = dbc.Alert([html.I(className="bi bi-graph-up me-2"), deg_text],
-                            style={"backgroundColor":"#0D1F2D","borderColor":BLUE,
-                                   "color":TEXT,"borderLeft":f"4px solid {BLUE}"}) if deg_text else html.Div()
+        insight = dbc.Alert([html.I(className="bi bi-lightning-charge-fill me-2"), deg_text],
+                            style={"backgroundColor":"#0D1520","borderColor":BLUE,
+                                   "color":TEXT,"borderLeft":f"4px solid {BLUE}",
+                                   "fontSize":".9rem"}) if deg_text else html.Div()
 
         return html.Div([
             dbc.Row([
@@ -476,31 +603,54 @@ def render_tab(tab, store):
                                     titlefont=dict(color=TEXT)),
             **{k:v for k,v in CHART_LAYOUT.items() if k not in ["xaxis","yaxis"]}, height=420)
 
+        top20_geo = by_country.head(20)
         fig_pays = go.Figure(go.Bar(
-            y=by_country.head(20)["Country"][::-1],
-            x=by_country.head(20)["Athletes"][::-1],
-            orientation="h", marker_color=ACCENT,
-            text=by_country.head(20)["Athletes"][::-1], textposition="outside"))
-        fig_pays.update_layout(title="Top 20 pays – Athlètes", height=500, **CHART_LAYOUT)
+            y=top20_geo["Country"][::-1],
+            x=top20_geo["Athletes"][::-1],
+            orientation="h",
+            marker=dict(
+                color=list(range(20, 0, -1)),
+                colorscale=[[0, CARD_BG],[1, ACCENT]],
+                showscale=False,
+                line=dict(color="rgba(0,0,0,0)", width=0)),
+            text=top20_geo["Athletes"][::-1],
+            textposition="outside", cliponaxis=False,
+            textfont=dict(size=11, color=TEXT),
+            hovertemplate="<b>%{y}</b><br>%{x} athlètes<br>Temps moyen : %{customdata[0]:.1f} min<extra></extra>",
+            customdata=top20_geo[["Avg_min"]][::-1].values))
+        fig_pays.update_layout(**_lay("Top 20 pays par participation",
+            margin=dict(l=50, r=70, t=55, b=40), height=520,
+            xaxis=dict(title="Nombre d'athlètes", range=[0, top20_geo["Athletes"].max()*1.2],
+                       gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11)),
+            yaxis=dict(gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=12))))
 
-        fig_scat = px.scatter(by_country[by_country["Athletes"] > 0],
+        fig_scat = px.scatter(by_country[by_country["Athletes"] >= 5],
                               x="Athletes", y="Avg_min", text="Country",
                               size="Athletes", color="Avg_min",
                               color_continuous_scale="RdYlGn_r",
-                              labels={"Avg_min":"Temps moyen (min)"},
-                              title="Volume vs Performance")
-        fig_scat.update_layout(**CHART_LAYOUT)
-        fig_scat.update_traces(textposition="top center", marker=dict(sizemin=6))
+                              labels={"Athletes":"Athlètes","Avg_min":"Temps moyen (min)"},
+                              hover_data={"Athletes":True,"Avg_min":":.1f","Best_min":":.1f"})
+        fig_scat.update_traces(textposition="top center", marker=dict(sizemin=6, sizeref=1.5),
+                               textfont=dict(size=10))
+        fig_scat.update_layout(**_lay("Volume vs Performance par pays",
+            coloraxis_colorbar=dict(title="Temps moy.", tickfont=dict(color=TEXT),
+                                    titlefont=dict(color=TEXT))))
 
         top5 = by_country.head(5)["Country"].tolist()
         d5   = d_geo[d_geo["Country"].isin(top5)]
         fig_vio = go.Figure()
-        for c in top5:
-            fig_vio.add_trace(go.Violin(y=d5[d5["Country"]==c]["Total_min"].dropna(),
-                                        name=c, box_visible=True, meanline_visible=True,
-                                        line_color=ACCENT))
-        fig_vio.update_layout(title="Distribution – Top 5 pays",
-                              yaxis_title="Temps (min)", **CHART_LAYOUT)
+        for i, c in enumerate(top5):
+            col_v = TAB_COLORS[i % len(TAB_COLORS)]
+            fig_vio.add_trace(go.Violin(
+                y=d5[d5["Country"]==c]["Total_min"].dropna(),
+                name=c, box_visible=True, meanline_visible=True,
+                line_color=col_v,
+                fillcolor=col_v.replace("#", "rgba(").replace(")", ",0.15)") if col_v.startswith("#") else col_v,
+                hovertemplate=f"<b>{c}</b><br>%{{y:.1f}} min<extra></extra>"))
+        fig_vio.update_layout(**_lay("Distribution des temps — Top 5 pays",
+            yaxis=dict(title="Temps final (min)", gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11)),
+            xaxis=dict(gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=12)),
+            showlegend=False))
 
         return html.Div([
             dbc.Row([dbc.Col(card(dcc.Graph(figure=fig_map, config={"displayModeBar":False})), md=12)],
@@ -531,33 +681,58 @@ def render_tab(tab, store):
                    .round(2).reset_index()
                    .sort_values("Athletes", ascending=False))
 
+        by_cat["Label"] = by_cat["Category"].astype(str).str.replace("HYROX ","",regex=False)
         fig_cat = go.Figure(go.Bar(
-            x=by_cat["Category"].str.replace("HYROX ",""),
-            y=by_cat["Athletes"], marker_color=ACCENT,
-            text=by_cat["Athletes"], textposition="outside"))
-        fig_cat.update_layout(title="Athlètes par catégorie",
-                              xaxis_tickangle=-30, **CHART_LAYOUT)
+            x=by_cat["Label"], y=by_cat["Athletes"],
+            marker=dict(color=TAB_COLORS[:len(by_cat)],
+                        line=dict(color="rgba(0,0,0,0)", width=0)),
+            text=by_cat["Athletes"],
+            textposition="outside", cliponaxis=False,
+            textfont=dict(size=11, color=TEXT),
+            hovertemplate="<b>%{x}</b><br>%{y} athlètes<extra></extra>"))
+        fig_cat.update_layout(**_lay("Athlètes par catégorie",
+            margin=dict(l=50, r=30, t=55, b=90),
+            yaxis=dict(title="Athlètes", range=[0, by_cat["Athletes"].max()*1.2],
+                       gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11)),
+            xaxis=dict(tickangle=-30, gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=10))))
+
+        # Filtrer les groupes d'âge standard
+        standard_ag = ["16-24","25-29","30-34","35-39","40-44","45-49","50-54","55-59","60-64"]
+        by_ag_std = by_ag[by_ag["Age_Group"].isin(standard_ag)].copy()
 
         fig_ag = go.Figure()
-        fig_ag.add_trace(go.Scatter(x=by_ag["Age_Group"], y=by_ag["Avg_min"],
-                                    name="Moyen", mode="lines+markers",
-                                    line=dict(color=ACCENT,width=3)))
-        fig_ag.add_trace(go.Scatter(x=by_ag["Age_Group"], y=by_ag["Median_min"],
-                                    name="Médian", mode="lines+markers",
-                                    line=dict(color=BLUE,width=2)))
-        fig_ag.add_trace(go.Scatter(x=by_ag["Age_Group"], y=by_ag["Best_min"],
-                                    name="Meilleur", mode="lines+markers",
-                                    line=dict(color=GREEN,width=2,dash="dash")))
-        fig_ag.update_layout(title="Temps par tranche d'âge",
-                             yaxis_title="Temps (min)", **CHART_LAYOUT)
+        fig_ag.add_trace(go.Scatter(
+            x=by_ag_std["Age_Group"], y=by_ag_std["Avg_min"],
+            name="Moyenne", mode="lines+markers",
+            line=dict(color=ACCENT, width=3), marker=dict(size=8),
+            hovertemplate="<b>%{x}</b><br>Moyenne : %{y:.1f} min<extra></extra>"))
+        fig_ag.add_trace(go.Scatter(
+            x=by_ag_std["Age_Group"], y=by_ag_std["Median_min"],
+            name="Médiane", mode="lines+markers",
+            line=dict(color=BLUE, width=2), marker=dict(size=7),
+            hovertemplate="<b>%{x}</b><br>Médiane : %{y:.1f} min<extra></extra>"))
+        fig_ag.add_trace(go.Scatter(
+            x=by_ag_std["Age_Group"], y=by_ag_std["Best_min"],
+            name="Meilleur", mode="lines+markers",
+            line=dict(color=GREEN, width=2, dash="dash"), marker=dict(size=6),
+            hovertemplate="<b>%{x}</b><br>Meilleur : %{y:.1f} min<extra></extra>"))
+        fig_ag.update_layout(**_lay("Performance par tranche d'âge",
+            yaxis=dict(title="Temps (min)", gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11)),
+            xaxis=dict(gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11))))
 
         fig_stack = go.Figure()
-        fig_stack.add_trace(go.Bar(name="Running", x=by_ag["Age_Group"],
-                                   y=by_ag["Avg_Run_min"], marker_color=BLUE))
-        fig_stack.add_trace(go.Bar(name="Workout", x=by_ag["Age_Group"],
-                                   y=by_ag["Avg_Work_min"], marker_color=ACCENT))
-        fig_stack.update_layout(barmode="stack", title="Running/Workout par âge",
-                                yaxis_title="Temps (min)", **CHART_LAYOUT)
+        fig_stack.add_trace(go.Bar(
+            name="Running", x=by_ag_std["Age_Group"], y=by_ag_std["Avg_Run_min"],
+            marker=dict(color=BLUE, line=dict(color="rgba(0,0,0,0)", width=0)),
+            hovertemplate="<b>%{x}</b><br>Running : %{y:.1f} min<extra></extra>"))
+        fig_stack.add_trace(go.Bar(
+            name="Workout", x=by_ag_std["Age_Group"], y=by_ag_std["Avg_Work_min"],
+            marker=dict(color=ACCENT, line=dict(color="rgba(0,0,0,0)", width=0)),
+            hovertemplate="<b>%{x}</b><br>Workout : %{y:.1f} min<extra></extra>"))
+        fig_stack.update_layout(**_lay("Running vs Workout par tranche d'âge",
+            barmode="stack",
+            yaxis=dict(title="Temps (min)", gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11)),
+            xaxis=dict(gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11))))
 
         return html.Div([
             dbc.Row([
@@ -658,6 +833,7 @@ def render_tab(tab, store):
             ("Médiane",    d_solo["Total_sec"].quantile(0.50), BLUE,    "solid",  2),
             ("Bottom 10%", d_solo["Total_sec"].quantile(0.90), SUBTEXT, "dot",    2),
         ]
+        all_paces = {}
         for lbl, thr, col, dash, width in levels:
             if lbl == "Top 10%":
                 sub = d_solo[d_solo["Total_sec"] <= thr]
@@ -670,21 +846,24 @@ def render_tab(tab, store):
             sub = sub.dropna(subset=rc)
             if len(sub) == 0: continue
             paces = [sub[c].median() for c in rc]
+            all_paces[lbl] = paces
             fig_pace.add_trace(go.Scatter(
                 x=RUN_LABELS[:len(paces)], y=[p/60 for p in paces],
-                mode="lines+markers+text",
-                name=lbl,
-                text=[f"{int(p//60)}:{int(p%60):02d}" for p in paces],
-                textposition="top center",
+                mode="lines+markers", name=lbl,
                 line=dict(color=col, width=width, dash=dash),
-                marker=dict(size=8)))
+                marker=dict(size=9, symbol="circle"),
+                hovertemplate=f"<b>{lbl} · %{{x}}</b><br>%{{y:.2f}} min/km<extra></extra>"))
+        # Annotation Run 2 effet propulsion
         fig_pace.add_annotation(
-            x="Run 2", yref="paper", y=1.05,
-            text="Run 2 = fastest (Ski Erg propulsion effect)",
-            showarrow=False, font=dict(color=GREEN, size=11))
-        fig_pace.update_layout(
-            title="Run Pace 1→8 — Top 10% / Médiane / Bottom 10%",
-            yaxis_title="Pace (min/km)", **CHART_LAYOUT)
+            x="Run 2", yref="paper", y=1.06,
+            text="⚡ Run 2 = le plus rapide (effet propulsion Ski Erg)",
+            showarrow=False, font=dict(color=GREEN, size=11),
+            bgcolor=PLOTBG, borderpad=4)
+        fig_pace.update_layout(**_lay("Évolution du pace Run 1→8 par niveau de performance",
+            yaxis=dict(title="Pace (min/km)", autorange="reversed",
+                       gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11)),
+            xaxis=dict(gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11)),
+            margin=dict(l=60, r=30, t=65, b=50)))
 
         # ── 2. Roxzone Impact ─────────────────────────────────────────────────
         d_rox = d_solo.dropna(subset=["Roxzone_sec","Total_sec"]).copy()
@@ -693,25 +872,25 @@ def render_tab(tab, store):
         d_rox_s = d_rox.sample(min(3000, len(d_rox)), random_state=42)
         fig_rox = px.scatter(
             d_rox_s, x="Rox_min", y="Total_min_r",
-            color="Category", opacity=0.5, size_max=6,
-            labels={"Rox_min": "Roxzone (min)", "Total_min_r": "Temps final (min)"},
-            title="Roxzone vs Temps final — chaque point = 1 athlète",
-            color_discrete_sequence=COLORS)
-        # Ligne de tendance manuelle
+            color="Category", opacity=0.45,
+            labels={"Rox_min":"Roxzone (min)","Total_min_r":"Temps final (min)","Category":"Catégorie"},
+            color_discrete_sequence=COLORS,
+            hover_data={"Rox_min":":.1f","Total_min_r":":.1f","Category":True})
+        fig_rox.update_traces(marker=dict(size=4))
         if len(d_rox) > 10:
             z = np.polyfit(d_rox["Rox_min"].fillna(0), d_rox["Total_min_r"].fillna(0), 1)
             x_line = np.linspace(d_rox["Rox_min"].min(), d_rox["Rox_min"].max(), 100)
             fig_rox.add_trace(go.Scatter(
-                x=x_line, y=np.polyval(z, x_line),
-                mode="lines", name="Tendance",
+                x=x_line, y=np.polyval(z, x_line), mode="lines",
+                name="Tendance", showlegend=True,
                 line=dict(color=ACCENT, width=2, dash="dash")))
         fig_rox.add_annotation(
-            xref="paper", yref="paper", x=0.02, y=0.95,
-            text=f"Top 10% = 5.4 min · Bottom 10% = 12.1 min",
-            showarrow=False, font=dict(color=ORANGE, size=11),
-            bgcolor=CARD_BG, bordercolor=ORANGE)
-        fig_rox.update_layout(**CHART_LAYOUT)
-        fig_rox.update_traces(marker=dict(size=4))
+            xref="paper", yref="paper", x=0.98, y=0.06,
+            text="Top 10% : 5min24 en transitions<br>Bottom 10% : 12min06 → écart 6min42",
+            showarrow=False, font=dict(color=ORANGE, size=10), align="right",
+            bgcolor=CARD_BG, bordercolor=ORANGE, borderwidth=1, borderpad=6)
+        fig_rox.update_layout(**_lay("Impact de la Roxzone sur le temps final",
+            margin=dict(l=60, r=30, t=55, b=50)))
 
         # ── 3. Station DNA (coefficient de variation) ─────────────────────────
         cv_data = []
@@ -785,18 +964,27 @@ def render_tab(tab, store):
             ("HYROX DOUBLES WOMEN",   "Doubles Femmes"),
             ("HYROX PRO WOMEN",       "Pro Femmes"),
         ]
+        fmt_colors = [ACCENT, "#F97316", GREEN, BLUE, "#A855F7", "#14B8A6"]
         fig_fmt = go.Figure()
-        for cat, lbl in format_cats:
+        for i, (cat, lbl) in enumerate(format_cats):
             sub = d[d["Category"].astype(str) == cat]["Total_sec"].dropna() / 60
             if len(sub) < 10: continue
-            col = ACCENT if "MEN" in cat else BLUE
+            col_f = fmt_colors[i % len(fmt_colors)]
+            med_f = sub.median()
             fig_fmt.add_trace(go.Box(
                 y=sub, name=lbl,
-                marker_color=col, boxmean=True,
-                line=dict(color=col)))
-        fig_fmt.update_layout(
-            title="Battle of Formats — Distribution des temps par format (box = médiane + IQR)",
-            yaxis_title="Temps final (min)", showlegend=False, **CHART_LAYOUT)
+                marker=dict(color=col_f, opacity=0.6, size=3),
+                line=dict(color=col_f, width=2),
+                boxmean=True,
+                hovertemplate=f"<b>{lbl}</b><br>%{{y:.1f}} min<extra></extra>"))
+            fig_fmt.add_annotation(
+                x=lbl, y=sub.quantile(0.75) + 1,
+                text=f"{med_f:.0f}m", showarrow=False,
+                font=dict(color=col_f, size=10))
+        fig_fmt.update_layout(**_lay("Battle of Formats — Comparaison Solo / Doubles / Pro",
+            yaxis=dict(title="Temps final (min)", gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11)),
+            xaxis=dict(gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11)),
+            showlegend=False, margin=dict(l=60, r=30, t=55, b=60)))
 
         # ── 5. Predictor Score ────────────────────────────────────────────────
         pred_data = []
@@ -943,14 +1131,26 @@ def upd_athlete(idx, cmp_mode, store):
     ath_r = [row[c]/60 if pd.notna(row.get(c)) else 0 for c in rc]
     ref_r2 = [ref_r[c]/60 for c in rc]
     fig_runs = go.Figure()
-    fig_runs.add_trace(go.Bar(name=short, x=RUN_LABELS[:len(ath_r)], y=ath_r,
-                              marker_color=ACCENT, text=[sec_to_mmss(v*60) for v in ath_r],
-                              textposition="outside"))
-    fig_runs.add_trace(go.Bar(name=ref_lbl, x=RUN_LABELS[:len(ref_r2)], y=ref_r2,
-                              marker_color=BLUE, text=[sec_to_mmss(v*60) for v in ref_r2],
-                              textposition="outside"))
-    fig_runs.update_layout(barmode="group", title="Splits Running",
-                           yaxis_title="Temps (min)", **CHART_LAYOUT)
+    fig_runs.add_trace(go.Bar(
+        name=short, x=RUN_LABELS[:len(ath_r)], y=ath_r,
+        marker=dict(color=ACCENT, line=dict(color="rgba(0,0,0,0)", width=0)),
+        text=[sec_to_mmss(v*60) for v in ath_r],
+        textposition="outside", cliponaxis=False,
+        textfont=dict(size=10, color=TEXT),
+        hovertemplate="<b>%{x}</b><br>" + short + " : %{text}<extra></extra>"))
+    fig_runs.add_trace(go.Bar(
+        name=ref_lbl, x=RUN_LABELS[:len(ref_r2)], y=ref_r2,
+        marker=dict(color=BLUE, opacity=0.7, line=dict(color="rgba(0,0,0,0)", width=0)),
+        text=[sec_to_mmss(v*60) for v in ref_r2],
+        textposition="outside", cliponaxis=False,
+        textfont=dict(size=10, color=TEXT),
+        hovertemplate="<b>%{x}</b><br>" + ref_lbl + " : %{text}<extra></extra>"))
+    max_run_v = max(ath_r + ref_r2) if ath_r else 6
+    fig_runs.update_layout(**_lay(f"Splits Running — {short} vs {ref_lbl}",
+        barmode="group",
+        yaxis=dict(title="Temps (min)", range=[0, max_run_v*1.25],
+                   gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11)),
+        xaxis=dict(gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(size=11))))
 
     medians = {col: d[col].median() for col in WORKOUT_COLS if col in d.columns}
     score_cards = dbc.Row([
