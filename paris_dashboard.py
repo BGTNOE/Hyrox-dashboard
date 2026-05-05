@@ -694,11 +694,12 @@ def render_tab(tab, store):
         n_over40 = len(d_solo[d_solo["Age_Group"].isin(["40-44","45-49","50-54","55-59","60-64"])])
 
         n_solo_kpi = len(d_solo)
-        pct_fr_kpi = round(len(d_solo[d_solo["Country"]=="FR"]) / max(n_solo_kpi,1) * 100, 1)
+        n_fr_solo = len(d_solo[d_solo["Country"]=="FR"])
+        pct_fr_kpi = round(n_fr_solo / max(n_solo_kpi,1) * 100, 1)
         demo_kpis = dbc.Row([
             dbc.Col(kpi_card("bi-people-fill",   "Participants solo", f"{n_solo_kpi:,}".replace(",","·"), "Men / Women / Pro"), md=3),
             dbc.Col(kpi_card("bi-globe2",        "Nationalités",      f"{n_countries_real}", "représentées"), md=3),
-            dbc.Col(kpi_card("bi-flag-fill",     "Participants FR",   f"{pct_fr_kpi}%", "des catégories solo"), md=3),
+            dbc.Col(kpi_card("bi-flag-fill",     "Athlètes français", f"{n_fr_solo}", f"{pct_fr_kpi}% des solo"), md=3),
             dbc.Col(kpi_card("bi-person-check",  "Athlètes 40+",      f"{n_over40}", "participent en solo"), md=3),
         ], className="g-3 mb-3")
 
@@ -802,7 +803,7 @@ def render_tab(tab, store):
         ))
         fig_ctry.add_annotation(
             xref="paper", yref="paper", x=0.5, y=1.08,
-            text=f"● France : {pct_fr_all}% des participants · toutes catégories confondues",
+            text=f"● France : {n_fr_solo} athlètes solo ({pct_fr_kpi}% des solos) — pays non renseigné pour les équipes",
             showarrow=False, font=dict(color=ACCENT, size=11), xanchor="center")
         fig_ctry.update_layout(**_lay(
             f"Top 12 nationalités — {n_countries_real} pays représentés",
